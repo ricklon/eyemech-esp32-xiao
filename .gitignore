@@ -8,6 +8,9 @@ sdkconfig.*
 managed_components/
 dependencies.lock
 
+# Generated from components/eye_web/index.html at CMake configure time
+index_html.c
+
 # Secrets — never commit WiFi credentials
 secrets.h
 

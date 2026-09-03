@@ -1,0 +1,4 @@
+## cJSON left ESP-IDF core in v6.0 and now ships from the component registry.
+## Same library that used to be the built-in `json` component.
+dependencies:
+  espressif/cjson: "^1.7.18"

@@ -12,3 +12,10 @@ CONFIG_UART_ISR_IN_IRAM=y
 # HTTP control page + JSON endpoints
 CONFIG_HTTPD_MAX_REQ_HDR_LEN=1024
 CONFIG_HTTPD_MAX_URI_LEN=512
+
+# Both XIAO variants ship 4MB flash; the IDF default of 2MB triggers a
+# size-mismatch warning and wastes half the part.
+CONFIG_ESPTOOLPY_FLASHSIZE_4MB=y
+
+# App partition sizing lives in partitions.csv, wired up via
+# board_build.partitions so PlatformIO's size check agrees with the real table.

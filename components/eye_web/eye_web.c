@@ -26,8 +26,10 @@
 
 static const char *TAG = "eye_web";
 
-extern const uint8_t index_html_start[] asm("_binary_index_html_start");
-extern const uint8_t index_html_end[]   asm("_binary_index_html_end");
+/* Generated from index.html at configure time — see this component's
+ * CMakeLists.txt for why it is not EMBED_TXTFILES. */
+extern const unsigned char index_html_start[];
+extern const unsigned int  index_html_len;
 
 /* ---------------------------------------------------------------- helpers */
 
@@ -81,8 +83,7 @@ static int jservo(const cJSON *o)
 static esp_err_t root_get(httpd_req_t *req)
 {
     httpd_resp_set_type(req, "text/html");
-    return httpd_resp_send(req, (const char *)index_html_start,
-                           index_html_end - index_html_start - 1);
+    return httpd_resp_send(req, (const char *)index_html_start, index_html_len);
 }
 
 static esp_err_t state_get(httpd_req_t *req)
@@ -165,7 +166,12 @@ static esp_err_t blink_post(httpd_req_t *req)
 static esp_err_t servo_post(httpd_req_t *req)
 {
     if (eye_motion_get_mode() != EYE_MODE_CALIBRATION) {
-        return httpd_resp_send_err(req, HTTPD_409_CONFLICT, "not in calibration mode");
+        /* esp_http_server's error enum has no 409, so set the status line
+         * directly. "Wrong mode" is a conflict, not a malformed request, and
+         * eyectl surfaces the code verbatim. */
+        httpd_resp_set_status(req, "409 Conflict");
+        httpd_resp_set_type(req, "application/json");
+        return httpd_resp_sendstr(req, "{\"error\":\"not in calibration mode\"}");
     }
     cJSON *body = NULL;
     if (read_json(req, &body) != ESP_OK) {
