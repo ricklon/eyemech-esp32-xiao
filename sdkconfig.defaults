@@ -1,15 +1,14 @@
-# Baseline config. Anything you change via `pio run -t menuconfig` lands in
-# sdkconfig (gitignored) — promote settings worth keeping into this file.
+# Shared baseline. Anything changed via `pio run -t menuconfig` lands in the
+# generated sdkconfig (gitignored) — promote keepers here.
 
-CONFIG_IDF_TARGET="esp32s3"
 CONFIG_FREERTOS_HZ=1000
 CONFIG_ESP_MAIN_TASK_STACK_SIZE=8192
 
-# HTTP server headroom for the control page + JSON endpoints
+# Grove Vision AI runs at 921600 baud and overruns a default-sized RX buffer
+# mid-packet, which silently corrupts box parsing. Same failure the MicroPython
+# port hit before rxbuf was raised to 2048.
+CONFIG_UART_ISR_IN_IRAM=y
+
+# HTTP control page + JSON endpoints
 CONFIG_HTTPD_MAX_REQ_HDR_LEN=1024
 CONFIG_HTTPD_MAX_URI_LEN=512
-
-# Flash / PSRAM — XIAO ESP32-S3 has 8MB flash, 8MB PSRAM (N8R8)
-CONFIG_ESPTOOLPY_FLASHSIZE_8MB=y
-CONFIG_SPIRAM=y
-CONFIG_SPIRAM_MODE_OCT=y

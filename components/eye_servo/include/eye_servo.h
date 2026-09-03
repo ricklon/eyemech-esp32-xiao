@@ -1,75 +1,79 @@
 #pragma once
 /*
- * eye_servo — LEDC-based hobby-servo driver for the eye mechanism.
+ * eye_servo — port of micropython/servo.py, plus the servo_limits table that
+ * lived at the top of main.py and the NVS persistence the MicroPython version
+ * never had (it reflashed instead).
  *
- * One LEDC timer at 50 Hz drives up to EYE_AXIS_COUNT channels. Every axis
- * carries its own calibration (pulse-width endpoints + center + inversion)
- * so mechanical differences between linkages stay out of the motion layer.
- *
- * TODO(hardware): confirm the axis list below against the actual mechanism.
- * The six axes here are the common Nilheim-style layout; a 4-servo build
- * would drop the lower lids.
+ * Angles in degrees are the currency everywhere above this layer, exactly as in
+ * the original. Microseconds exist here and in pca9685 only.
  */
 #include <stdbool.h>
 #include <stdint.h>
 #include "esp_err.h"
+#include "pca9685.h"
 
 #ifdef __cplusplus
 extern "C" {
 #endif
 
+/* PCA9685 channel order, from docs/WIRING.md. */
 typedef enum {
-    EYE_AXIS_PAN = 0,        /* both eyes left/right  */
-    EYE_AXIS_TILT,           /* both eyes up/down     */
-    EYE_AXIS_LID_UPPER_L,
-    EYE_AXIS_LID_UPPER_R,
-    EYE_AXIS_LID_LOWER_L,
-    EYE_AXIS_LID_LOWER_R,
-    EYE_AXIS_COUNT
-} eye_axis_t;
+    EYE_LR = 0,   /* ch 0 — eye left/right   */
+    EYE_UD,       /* ch 1 — eye up/down      */
+    EYE_TL,       /* ch 2 — top-left lid     */
+    EYE_BL,       /* ch 3 — bottom-left lid  */
+    EYE_TR,       /* ch 4 — top-right lid    */
+    EYE_BR,       /* ch 5 — bottom-right lid */
+    EYE_SERVO_COUNT
+} eye_servo_id_t;
 
-/* Per-axis calibration, persisted in NVS under namespace "eyemech". */
+/*
+ * Travel limits. IMPORTANT: max may be numerically SMALLER than min — that is
+ * how BL and TR encode being mounted mirrored relative to their partners. Never
+ * assume min < max, never "normalize" this by swapping them.
+ */
 typedef struct {
-    uint16_t min_us;      /* pulse width at normalized -1.0 */
-    uint16_t center_us;   /* pulse width at normalized  0.0 */
-    uint16_t max_us;      /* pulse width at normalized +1.0 */
-    bool     inverted;    /* flip sign before mapping       */
-} eye_servo_cal_t;
+    float min;
+    float max;
+} eye_limits_t;
 
-/* Absolute safety rails — calibration is clamped into this window. */
-#define EYE_SERVO_PULSE_MIN_US 500
-#define EYE_SERVO_PULSE_MAX_US 2500
-#define EYE_SERVO_FREQ_HZ      50
+/* Per-servo pulse mapping. trim_us is the mechanical centring offset — use it
+ * rather than fudging the limits. */
+typedef struct {
+    uint16_t min_us;      /* default 500  */
+    uint16_t max_us;      /* default 2500 */
+    float    min_angle;   /* default 0    */
+    float    max_angle;   /* default 180  */
+    int16_t  trim_us;
+} eye_servo_cfg_t;
 
-/* Bring up the LEDC timer and all channels. Loads calibration from NVS,
- * falling back to eye_servo_default_cal() for any axis without a stored blob. */
-esp_err_t eye_servo_init(void);
+esp_err_t eye_servo_init(pca9685_t *dev);
 
-/* Park every axis at its calibrated center and stop driving. */
-esp_err_t eye_servo_release(void);
+/* Clamps to [min_angle, max_angle] rather than erroring, and skips redundant
+ * writes — the motion loop rewrites identical lid targets constantly and I²C is
+ * the bottleneck. Do not remove the skip. */
+esp_err_t eye_servo_write(eye_servo_id_t id, float angle);
 
-/* Command an axis in normalized units, -1.0 .. +1.0. Values outside the
- * range are clamped, never wrapped. */
-esp_err_t eye_servo_set(eye_axis_t axis, float normalized);
+/* Last commanded angle, or NAN if never written. */
+float eye_servo_read(eye_servo_id_t id);
 
-/* Command a raw pulse width. Intended for the calibration UI only —
- * the motion layer should always go through eye_servo_set(). */
-esp_err_t eye_servo_set_us(eye_axis_t axis, uint16_t pulse_us);
+/* Stop driving one servo / all servos. They go limp. */
+esp_err_t eye_servo_release(eye_servo_id_t id);
+esp_err_t eye_servo_release_all(void);
 
-/* Last commanded value for an axis. */
-float    eye_servo_get(eye_axis_t axis);
-uint16_t eye_servo_get_us(eye_axis_t axis);
+eye_limits_t eye_servo_limits(eye_servo_id_t id);
+esp_err_t    eye_servo_set_limits(eye_servo_id_t id, eye_limits_t limits);
 
-/* Calibration access. eye_servo_set_cal() applies immediately and holds the
- * value in RAM; call eye_servo_save_cal() to commit all axes to NVS. */
-esp_err_t       eye_servo_set_cal(eye_axis_t axis, const eye_servo_cal_t *cal);
-eye_servo_cal_t eye_servo_get_cal(eye_axis_t axis);
-eye_servo_cal_t eye_servo_default_cal(eye_axis_t axis);
-esp_err_t       eye_servo_save_cal(void);
-esp_err_t       eye_servo_load_cal(void);
+eye_servo_cfg_t eye_servo_cfg(eye_servo_id_t id);
+esp_err_t       eye_servo_set_cfg(eye_servo_id_t id, eye_servo_cfg_t cfg);
 
-/* Human-readable axis name, stable across the API and web UI. */
-const char *eye_servo_axis_name(eye_axis_t axis);
+/* Persist limits + cfg to NVS under namespace "eyemech". */
+esp_err_t eye_servo_save(void);
+esp_err_t eye_servo_load(void);
+esp_err_t eye_servo_reset_defaults(void);
+
+const char *eye_servo_name(eye_servo_id_t id);
+int         eye_servo_from_name(const char *name);  /* -1 if unknown */
 
 #ifdef __cplusplus
 }

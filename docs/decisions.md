@@ -2,38 +2,69 @@
 
 Short entries. Date, decision, reasoning, and what would change our mind.
 
-## 2026-09-03 — ESP-IDF over Arduino
+## 2026-09-03 — Port MicroPython to ESP-IDF C, keeping the original
 
-Chose PlatformIO + ESP-IDF rather than PlatformIO + Arduino.
+The MicroPython build works. The port is for headroom — WiFi, a real control
+surface, and eventually sharing a codebase with the xiaozhi voice agent, which
+is ESP-IDF native.
 
-The eye mechanism may eventually share a board or a codebase with the xiaozhi
-voice agent, which is ESP-IDF native. Starting on Arduino would mean either a
-port later or a permanent bridge layer. The cost is a slower first blink and
-more boilerplate around WiFi and HTTP.
+`micropython/` stays in the repo as the reference implementation rather than
+being deleted. When the two disagree, the Python is right until a decision here
+says otherwise. Deleting it would throw away the only known-good description of
+how the mechanism should behave.
 
-Would revisit if: the xiaozhi integration is dropped and the project stays a
-standalone eye mechanism forever.
+## 2026-09-03 — Both XIAO boards, one codebase
 
-## 2026-09-03 — LEDC rather than MCPWM for servo PWM
+Targets the ESP32-C6 (what it runs on today) and the ESP32-S3 (more headroom,
+the xiaozhi path, a camera on the Sense variant). All pin differences live in
+`components/board/include/board_pins.h`; no other file contains a GPIO number.
 
-LEDC gives eight channels off one 50 Hz timer with a trivial API, and servo
-timing tolerance is generous — jitter of a few microseconds is invisible.
+The cost is one indirection. The benefit is that choosing a board later is a
+build-flag change rather than a port.
 
-Would revisit if: an axis needs tight phase relationships with another, or the
-channel count outgrows eight.
+Would revisit if: a third board needs peripherals the abstraction can't express.
 
-## 2026-09-03 — Normalized units above the servo layer
+## 2026-09-03 — Keep the PCA9685 rather than driving servos from the MCU
 
-Everything above `eye_servo` speaks in -1..+1 (lids 0..1). Microseconds live in
-the driver and the calibration endpoints only.
+The hardware exists and is wired. Native LEDC would save a part and an I²C bus,
+but it would also give up `/OE` — the one mechanism that reliably keeps servos
+limp through a reset — and would rewire the board.
 
-Keeps mechanical differences between linkages — different horn lengths, mirrored
-lid servos, inverted mounting — out of the motion logic entirely. The `inverted`
-flag in the calibration struct absorbs mirroring rather than the motion code
-special-casing left vs. right.
+Would revisit if: I²C latency turns out to cap the motion loop somewhere that
+matters.
 
-## 2026-09-03 — Single-file embedded control page
+## 2026-09-03 — Web control replaces the pots and switches
 
-`index.html` is embedded with `EMBED_TXTFILES`, no build step and no external
-requests. The board may well end up on a network with no internet route, and a
-control page that needs a CDN is a control page that fails when you need it.
+Three ADC pots, an enable switch, a mode switch and a blink button became a WiFi
+control page. Only GPIO0/1/2 are ADC-capable on the C6, so the pots had the pin
+map pinned around them; dropping them frees D0–D3, D8 and D9 on both boards, and
+calibration stops requiring a reflash.
+
+The loss is real: a control page needs a network and a phone, where a pot needs
+neither. If bench work turns out to want physical controls back, the freed pins
+are still there and the abstraction to re-add them is `eye_web`'s API surface.
+
+## 2026-09-03 — Calibration persists in NVS
+
+The MicroPython build edited `servo_limits` at the top of `main.py` and
+reflashed. With calibration now editable from a browser, it has to survive a
+reboot, so limits and per-servo pulse config are stored as one blob under
+namespace `eyemech`.
+
+One blob rather than per-axis keys so a partial write can't leave axes
+inconsistent.
+
+## 2026-09-03 — Angles, not normalized units
+
+Everything above `eye_servo` speaks in servo degrees, exactly as the Python did.
+A normalized -1..+1 API would be tidier, but it would make every formula in
+`control_ud_and_lids()` differ from the reference, which is the one thing that
+makes the port checkable.
+
+Would revisit if: the mechanism is redesigned and the reference stops mattering.
+
+## 2026-09-03 — `servo_limits` may run backwards, on purpose
+
+`BL` and `TR` are `(90, 10)`: max below min, encoding that those lid servos are
+mounted mirrored. Clamping code uses `fminf`/`fmaxf` rather than assuming an
+ordering. Normalizing the table would silently invert two lids.

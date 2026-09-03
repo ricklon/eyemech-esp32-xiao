@@ -1,17 +1,19 @@
 #pragma once
 /*
- * eye_web — WiFi station bring-up plus an HTTP control surface.
+ * eye_web — WiFi station plus the HTTP control surface that replaced the three
+ * ADC pots, the enable switch, the mode switch and the blink button.
  *
- * Endpoints:
- *   GET  /              embedded control + calibration page
- *   GET  /api/state     current mode, pose, and per-axis pulse widths
- *   POST /api/mode      {"mode":"idle"|"manual"|"calibrate"}
- *   POST /api/look      {"x":-1..1,"y":-1..1,"speed":0..1}
- *   POST /api/lids      {"upper":0..1,"lower":0..1,"speed":0..1}
- *   POST /api/blink     (no body)
- *   POST /api/jog       {"axis":"pan","us":1500}     calibrate mode only
- *   POST /api/cal       {"axis":"pan","min_us":..,"center_us":..,"max_us":..,"inverted":false}
- *   POST /api/cal/save  commit all axis calibration to NVS
+ *   GET  /                control + calibration page (embedded, no CDN)
+ *   GET  /api/state       mode, per-servo angle/limits/cfg, lid trim, vision
+ *   POST /api/mode        {"mode":"tracking"|"auto"|"manual"|"calibration"}
+ *   POST /api/look        {"lr":deg,"ud":deg}          switches to manual
+ *   POST /api/lid_trim    {"value":0..1}               was the trim pot
+ *   POST /api/blink       —                            was the blink button
+ *   POST /api/servo       {"servo":"TL","angle":120}   calibration mode only
+ *   POST /api/limits      {"servo":"TL","min":90,"max":170}
+ *   POST /api/cfg         {"servo":"TL","min_us":500,"max_us":2500,"trim_us":0}
+ *   POST /api/save        commit limits + cfg to NVS
+ *   POST /api/release     all servos limp
  */
 #include "esp_err.h"
 
@@ -19,8 +21,6 @@
 extern "C" {
 #endif
 
-/* Connects to WiFi (credentials from secrets.h) and starts the HTTP server.
- * Returns once the server is listening; WiFi may still be reconnecting. */
 esp_err_t eye_web_start(void);
 
 #ifdef __cplusplus

@@ -1,104 +1,134 @@
 # CLAUDE.md — eyemech-esp32-xiao
 
-Guidance for Claude Code working in this repo. Keep it current: when a decision
-here turns out wrong, fix the line rather than working around it.
+Guidance for Claude Code working in this repo. When a line here turns out to be
+wrong, fix it rather than working around it.
 
 ## What this is
 
-An animatronic eye mechanism driven by a Seeed Studio XIAO ESP32-S3. Firmware is
-ESP-IDF, built through PlatformIO. The first milestone is servo motion plus a
-WiFi control page for jogging axes and saving calibration.
+Will Cogley's animatronic eye mechanism, being **ported from MicroPython to
+ESP-IDF C**. Six servos on a PCA9685 over I²C, optional face tracking from a
+Grove Vision AI module over UART.
 
-**Status: scaffold.** Nothing here has been compiled or run on hardware yet. The
-structure and APIs are deliberate; the numbers are placeholders. Every guess is
-marked `TODO(hardware)` or `TODO(tuning)` — treat those as blocking questions for
-Rick, not as invitations to invent values.
+`micropython/` holds the working original. It is the **reference
+implementation** — when the C behaves differently from those three files, the
+Python is right and the C is wrong, unless a deliberate change is recorded in
+`docs/decisions.md`. Do not edit `micropython/` to make the C look correct.
 
-## Board facts
+**Status: port scaffolded, never compiled, never run.** Expect the first build to
+fail on include paths and IDF API drift. That is the first job, not a surprise.
 
-- **MCU**: ESP32-S3R8, dual-core Xtensa LX7 @ 240 MHz, 8 MB flash, 8 MB PSRAM
-- **Silk → GPIO**: `D0=1 D1=2 D2=3 D3=4 D4=5 D5=6 D6=43(TX) D7=44(RX) D8=7 D9=8 D10=9`
-- **Servo PWM**: LEDC, low-speed mode only on the S3. One timer at 50 Hz,
-  14-bit resolution, one channel per axis. 8 channels available, 6 in use.
-- **Do not** reassign D6/D7 (USB-serial console) without saying so explicitly.
-- Servos are **not** powered from the XIAO's 3V3 rail. External 5–6 V supply,
-  common ground with the board. See `docs/hardware.md`.
+## The port's three deliberate changes
+
+Everything else is meant to be behavior-identical to the Python.
+
+1. **Two boards, one codebase.** The original ran on a XIAO ESP32-C6. The port
+   also targets the XIAO ESP32-S3. Every pin difference lives in
+   `components/board/include/board_pins.h` and nowhere else. Never write a raw
+   GPIO number outside that file.
+2. **The pots and switches are gone.** Three ADC pots, an enable switch, a mode
+   switch and a blink button were the MicroPython control surface. `eye_web`
+   replaces all of them over WiFi. D0–D3, D8 and D9 are now free on both boards.
+3. **Calibration persists.** The MicroPython build reflashed to change
+   `servo_limits`; the C port stores limits and per-servo pulse config in NVS
+   under namespace `eyemech`, editable from the control page.
 
 ## Build and flash
 
-Builds run on Windows, where PlatformIO lives — not inside any Linux sandbox.
-
 ```
-pio run                  # build
-pio run -t upload        # flash
-pio device monitor       # serial, 115200
-pio run -t menuconfig    # ESP-IDF config; promote keepers to sdkconfig.defaults
-pio run -t clean
+pio run -e xiao_esp32c6                 # build for the C6
+pio run -e xiao_esp32s3 -t upload       # build and flash the S3
+pio device monitor                      # 115200
+pio run -e xiao_esp32c6 -t menuconfig   # promote keepers to sdkconfig.defaults
 ```
-
-`sdkconfig` is generated and gitignored. `sdkconfig.defaults` is the checked-in
-source of truth.
 
 Before the first build, copy `components/eye_web/include/secrets.h.example` to
-`secrets.h` in the same directory and fill in WiFi credentials. That file is
-gitignored — never commit it, never paste its contents into a commit message,
-an issue, or a doc.
+`secrets.h` beside it and fill in WiFi credentials. That file is gitignored —
+never commit it, never paste its contents into a commit message or a doc.
+
+`sdkconfig*` is generated and gitignored; `sdkconfig.defaults` is the checked-in
+source of truth.
 
 ## Layout
 
 ```
-src/main.c                  boot sequence only — keep it thin
-components/eye_servo/       LEDC servo driver + per-axis calibration in NVS
-components/eye_motion/      pose, easing, idle saccades and blinking (50 Hz task)
-components/eye_web/         WiFi STA + esp_http_server + embedded control page
-docs/                       hardware notes, roadmap, decision log
+src/main.c                boot sequence only — the /OE ordering lives here
+components/board/         board_pins.h: the only file with GPIO numbers in it
+components/pca9685/       port of micropython/pca9685.py, plus /OE control
+components/eye_servo/     port of micropython/servo.py + the servo_limits table
+components/eye_motion/    port of main.py's primitives and mode machine
+components/eye_vision/    port of main.py's Comms class (Grove Vision over UART)
+components/eye_web/       WiFi + HTTP control page; replaces the pots
+micropython/              THE ORIGINAL — reference, not dead code
+docs/WIRING.md            pin map, power, bring-up order, calibration procedure
+docs/PORTING.md           function-by-function map from Python to C
+tools/eyectl.py           drive the HTTP API from a shell
 ```
 
-**Layering rule**: `eye_web` → `eye_motion` → `eye_servo`. Never skip a layer.
-The one sanctioned exception is calibration, where the web layer reaches
-`eye_servo_set_us()` directly, and only while mode is `EYE_MODE_CALIBRATE`.
+## Things that will bite you
 
-## Conventions
+**`servo_limits` entries can run backwards.** `BL` and `TR` are `(90, 10)` —
+max is numerically smaller than min, because those two lid servos are mounted
+mirrored relative to their partners. Any code that clamps against these must
+handle either ordering; `eye_motion.c` does it with `fminf`/`fmaxf`. Never
+"fix" the table by swapping the values.
 
-- C, not C++. ESP-IDF style: `esp_err_t` returns, `ESP_RETURN_ON_ERROR` /
-  `ESP_ERROR_CHECK` at boundaries, one `TAG` per file.
-- Public API in `include/<component>.h`; everything else `static`.
-- Normalized units (`-1.0 .. +1.0`, lids `0.0 .. 1.0`) everywhere above the
-  servo driver. Microseconds appear only inside `eye_servo` and the
-  calibration endpoints.
-- Calibration is the only place pulse widths get clamped. Clamp, never wrap.
-- The web page is embedded via `EMBED_TXTFILES` — edit
-  `components/eye_web/index.html` directly, no build step, no CDN, no bundler.
-  It must stay a single file with no external requests.
+**The `/OE` ordering in `app_main()` is load-bearing.** `/OE` is active low and
+must stay high until every channel holds a position. A 10k pull-up to 3V3 covers
+the bootloader window when the GPIO floats. Without both, the servos slam
+through their linkages at every reset, which is how eye mechanisms lose teeth
+off their gears.
 
-## Safety rails that matter
+**`eye_servo_write()` skips redundant writes.** The motion loop rewrites
+identical lid targets constantly and I²C is the bottleneck; the skip is worth
+roughly an order of magnitude in loop rate. Don't remove it.
 
-A servo commanded past its mechanical limit stalls, heats, and strips gears
-within seconds. So:
+**Timing is wall-clock, not loop counts.** The original's
+`random.randrange(20000)` blink interval was tied to the Pico's loop rate and
+did not survive the port to a different core. Use `esp_timer_get_time()`.
 
-- `EYE_SERVO_PULSE_MIN_US` / `MAX_US` are absolute; nothing writes outside them.
-- Calibration setters reject `min >= max` and centers outside the range.
-- Anything that widens travel needs a bench test before it lands.
-- On any new axis, jog in **small** steps and watch the mechanism.
+**The coefficients in `control_ud_and_lids()` are the character of the face.**
+0.8 for the upper lids, 0.4 for the lower ones. Changing them changes how the
+mechanism reads as alive. If you change one, record it in `docs/decisions.md`.
 
-## Open questions for Rick
+## What still has to be measured on hardware
 
-These block real values in the code. Ask rather than assume:
+Do not invent these, and do not carry anything over from the Pico version.
 
-1. How many servos, and which axes? The code assumes six: pan, tilt, and four
-   independent lids. A 4-servo build drops the lower lids; a 3-servo build
-   ties the lids together.
-2. Mechanism type — printed Nilheim-style linkages, a ball-and-socket gimbal,
-   something of your own? This decides whether pan/tilt are independent.
-3. Servo model (SG90, MG90S, something with metal gears?) — sets the real
-   pulse endpoints and current budget.
-4. Power: what's feeding the servos, and how much headroom?
-5. Does this eventually merge with the xiaozhi voice agent, and if so does the
-   eye firmware drive itself or take commands from the agent?
+1. **PCA9685 oscillator** — clone boards ship 24–27 MHz instead of 25. If the
+   servos sit consistently off centre, scope a channel while commanding 50 Hz
+   and pass the result through `pca9685_trim_oscillator()`.
+2. **Per-servo pulse range** — `eye_servo` defaults to 500–2500 µs. Servos that
+   only honour 1000–2000 µs under-travel silently, which shows up here as lids
+   that never fully close.
+3. **`servo_limits` per axis** — the checked-in values are Will Cogley's and
+   assume his linkage geometry.
+4. **Which servos are actually fitted** — SG90 vs MG90S changes both the pulse
+   range and the supply sizing (see `docs/WIRING.md`).
+
+The pot endpoints the MicroPython build needed are no longer relevant: the pots
+are gone.
+
+## Safety
+
+A servo driven past a mechanical stop stalls, heats and strips its gears within
+seconds. Bringing up a new axis: one servo at a time, unloaded first, small
+steps, hand near the supply switch. `POST /api/release` or driving `/OE` high is
+the fast way to make everything go limp.
 
 ## Working style
 
 - Small commits, one concern each.
 - If a change can't be verified without hardware, say so in the commit body.
-- Don't add dependencies without asking; ESP-IDF's built-in components cover
-  everything planned so far.
+- No new dependencies without asking. ESP-IDF's built-ins cover everything here.
+- C, not C++. ESP-IDF style: `esp_err_t` returns, `ESP_RETURN_ON_ERROR` at
+  boundaries, one `TAG` per file, public API in `include/`, everything else
+  `static`.
+
+## Open questions for Rick
+
+- Is the Grove Vision AI module part of the build going forward, or is auto +
+  web control the real operating mode?
+- Does this connect to the xiaozhi voice agent eventually — eyes reacting to
+  agent state rather than to a camera?
+- Is the C6 or the S3 the board this actually ships on? Both build today, but
+  only one is going to get bench time.

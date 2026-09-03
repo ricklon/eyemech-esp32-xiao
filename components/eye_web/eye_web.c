@@ -1,6 +1,9 @@
 #include "eye_web.h"
 #include "eye_motion.h"
 #include "eye_servo.h"
+#include "eye_vision.h"
+#include "board_pins.h"
+#define EYEMECH_BOARD_NAME BOARD_NAME
 
 #include <string.h>
 #include "cJSON.h"
@@ -11,20 +14,17 @@
 #include "esp_netif.h"
 #include "esp_wifi.h"
 #include "freertos/FreeRTOS.h"
-#include "freertos/event_groups.h"
 
 #if __has_include("secrets.h")
 #  include "secrets.h"
 #else
-#  warning "secrets.h missing — copy secrets.h.example and fill in your WiFi credentials"
+#  warning "secrets.h missing — copy secrets.h.example and fill in WiFi credentials"
 #  define EYEMECH_WIFI_SSID     ""
 #  define EYEMECH_WIFI_PASSWORD ""
 #  define EYEMECH_HOSTNAME      "eyemech"
 #endif
 
 static const char *TAG = "eye_web";
-static EventGroupHandle_t s_wifi_events;
-#define WIFI_CONNECTED_BIT BIT0
 
 extern const uint8_t index_html_start[] asm("_binary_index_html_start");
 extern const uint8_t index_html_end[]   asm("_binary_index_html_end");
@@ -36,7 +36,6 @@ static esp_err_t read_json(httpd_req_t *req, cJSON **out)
     char buf[512];
     int total = req->content_len;
     if (total <= 0 || total >= (int)sizeof(buf)) return ESP_ERR_INVALID_SIZE;
-
     int received = 0;
     while (received < total) {
         int r = httpd_req_recv(req, buf + received, total - received);
@@ -44,7 +43,6 @@ static esp_err_t read_json(httpd_req_t *req, cJSON **out)
         received += r;
     }
     buf[received] = '\0';
-
     *out = cJSON_Parse(buf);
     return (*out != NULL) ? ESP_OK : ESP_ERR_INVALID_ARG;
 }
@@ -66,19 +64,16 @@ static esp_err_t send_ok(httpd_req_t *req)
     return send_json(req, root);
 }
 
-static float json_float(const cJSON *o, const char *key, float fallback)
+static float jnum(const cJSON *o, const char *key, float fallback)
 {
     const cJSON *v = cJSON_GetObjectItemCaseSensitive(o, key);
     return cJSON_IsNumber(v) ? (float)v->valuedouble : fallback;
 }
 
-static int axis_from_name(const char *name)
+static int jservo(const cJSON *o)
 {
-    if (name == NULL) return -1;
-    for (int i = 0; i < EYE_AXIS_COUNT; i++) {
-        if (strcmp(name, eye_servo_axis_name((eye_axis_t)i)) == 0) return i;
-    }
-    return -1;
+    const cJSON *v = cJSON_GetObjectItemCaseSensitive(o, "servo");
+    return cJSON_IsString(v) ? eye_servo_from_name(v->valuestring) : -1;
 }
 
 /* --------------------------------------------------------------- handlers */
@@ -92,38 +87,28 @@ static esp_err_t root_get(httpd_req_t *req)
 
 static esp_err_t state_get(httpd_req_t *req)
 {
-    eye_pose_t cur = eye_motion_current_pose();
-    eye_pose_t tgt = eye_motion_target_pose();
-
     cJSON *root = cJSON_CreateObject();
-    switch (eye_motion_get_mode()) {
-        case EYE_MODE_MANUAL:    cJSON_AddStringToObject(root, "mode", "manual");    break;
-        case EYE_MODE_CALIBRATE: cJSON_AddStringToObject(root, "mode", "calibrate"); break;
-        default:                 cJSON_AddStringToObject(root, "mode", "idle");      break;
-    }
+    cJSON_AddStringToObject(root, "mode", eye_motion_mode_name(eye_motion_get_mode()));
+    cJSON_AddStringToObject(root, "board", EYEMECH_BOARD_NAME);
+    cJSON_AddBoolToObject(root, "vision", eye_vision_present());
+    cJSON_AddNumberToObject(root, "lid_trim", eye_motion_get_lid_trim());
+    cJSON_AddNumberToObject(root, "lr", eye_motion_target_lr());
+    cJSON_AddNumberToObject(root, "ud", eye_motion_target_ud());
 
-    cJSON *pose = cJSON_AddObjectToObject(root, "pose");
-    cJSON_AddNumberToObject(pose, "gaze_x",    cur.gaze_x);
-    cJSON_AddNumberToObject(pose, "gaze_y",    cur.gaze_y);
-    cJSON_AddNumberToObject(pose, "lid_upper", cur.lid_upper);
-    cJSON_AddNumberToObject(pose, "lid_lower", cur.lid_lower);
-
-    cJSON *target = cJSON_AddObjectToObject(root, "target");
-    cJSON_AddNumberToObject(target, "gaze_x", tgt.gaze_x);
-    cJSON_AddNumberToObject(target, "gaze_y", tgt.gaze_y);
-
-    cJSON *axes = cJSON_AddArrayToObject(root, "axes");
-    for (int i = 0; i < EYE_AXIS_COUNT; i++) {
-        eye_servo_cal_t c = eye_servo_get_cal((eye_axis_t)i);
-        cJSON *a = cJSON_CreateObject();
-        cJSON_AddStringToObject(a, "name", eye_servo_axis_name((eye_axis_t)i));
-        cJSON_AddNumberToObject(a, "value",     eye_servo_get((eye_axis_t)i));
-        cJSON_AddNumberToObject(a, "pulse_us",  eye_servo_get_us((eye_axis_t)i));
-        cJSON_AddNumberToObject(a, "min_us",    c.min_us);
-        cJSON_AddNumberToObject(a, "center_us", c.center_us);
-        cJSON_AddNumberToObject(a, "max_us",    c.max_us);
-        cJSON_AddBoolToObject(a,   "inverted",  c.inverted);
-        cJSON_AddItemToArray(axes, a);
+    cJSON *servos = cJSON_AddArrayToObject(root, "servos");
+    for (int i = 0; i < EYE_SERVO_COUNT; i++) {
+        eye_limits_t l = eye_servo_limits((eye_servo_id_t)i);
+        eye_servo_cfg_t c = eye_servo_cfg((eye_servo_id_t)i);
+        cJSON *s = cJSON_CreateObject();
+        cJSON_AddStringToObject(s, "name", eye_servo_name((eye_servo_id_t)i));
+        cJSON_AddNumberToObject(s, "channel", i);
+        cJSON_AddNumberToObject(s, "angle", eye_servo_read((eye_servo_id_t)i));
+        cJSON_AddNumberToObject(s, "min", l.min);
+        cJSON_AddNumberToObject(s, "max", l.max);
+        cJSON_AddNumberToObject(s, "min_us", c.min_us);
+        cJSON_AddNumberToObject(s, "max_us", c.max_us);
+        cJSON_AddNumberToObject(s, "trim_us", c.trim_us);
+        cJSON_AddItemToArray(servos, s);
     }
     return send_json(req, root);
 }
@@ -135,14 +120,10 @@ static esp_err_t mode_post(httpd_req_t *req)
         return httpd_resp_send_err(req, HTTPD_400_BAD_REQUEST, "bad json");
     }
     const cJSON *m = cJSON_GetObjectItemCaseSensitive(body, "mode");
-    esp_err_t err = ESP_ERR_INVALID_ARG;
-    if (cJSON_IsString(m)) {
-        if      (strcmp(m->valuestring, "idle") == 0)      err = eye_motion_set_mode(EYE_MODE_IDLE);
-        else if (strcmp(m->valuestring, "manual") == 0)    err = eye_motion_set_mode(EYE_MODE_MANUAL);
-        else if (strcmp(m->valuestring, "calibrate") == 0) err = eye_motion_set_mode(EYE_MODE_CALIBRATE);
-    }
+    int mode = cJSON_IsString(m) ? eye_motion_mode_from_name(m->valuestring) : -1;
     cJSON_Delete(body);
-    if (err != ESP_OK) return httpd_resp_send_err(req, HTTPD_400_BAD_REQUEST, "unknown mode");
+    if (mode < 0) return httpd_resp_send_err(req, HTTPD_400_BAD_REQUEST, "unknown mode");
+    eye_motion_set_mode((eye_mode_t)mode);
     return send_ok(req);
 }
 
@@ -152,84 +133,98 @@ static esp_err_t look_post(httpd_req_t *req)
     if (read_json(req, &body) != ESP_OK) {
         return httpd_resp_send_err(req, HTTPD_400_BAD_REQUEST, "bad json");
     }
-    eye_motion_set_mode(EYE_MODE_MANUAL);
-    eye_motion_look_at(json_float(body, "x", 0.0f),
-                       json_float(body, "y", 0.0f),
-                       json_float(body, "speed", 0.2f));
+    float lr = jnum(body, "lr", eye_motion_target_lr());
+    float ud = jnum(body, "ud", eye_motion_target_ud());
     cJSON_Delete(body);
+
+    eye_motion_set_mode(EYE_MODE_MANUAL);
+    eye_motion_look(lr, ud);
     return send_ok(req);
 }
 
-static esp_err_t lids_post(httpd_req_t *req)
+static esp_err_t lid_trim_post(httpd_req_t *req)
 {
     cJSON *body = NULL;
     if (read_json(req, &body) != ESP_OK) {
         return httpd_resp_send_err(req, HTTPD_400_BAD_REQUEST, "bad json");
     }
-    eye_motion_set_mode(EYE_MODE_MANUAL);
-    eye_motion_set_lids(json_float(body, "upper", 1.0f),
-                        json_float(body, "lower", 1.0f),
-                        json_float(body, "speed", 0.3f));
+    eye_motion_set_lid_trim(jnum(body, "value", 0.5f));
     cJSON_Delete(body);
     return send_ok(req);
 }
 
 static esp_err_t blink_post(httpd_req_t *req)
 {
-    eye_motion_blink();
+    eye_motion_request_blink();
     return send_ok(req);
 }
 
-static esp_err_t jog_post(httpd_req_t *req)
+/* Direct angle write. Calibration mode only — this bypasses the motion layer,
+ * which is exactly what you want when fitting horns and exactly what you do not
+ * want while something else is driving. */
+static esp_err_t servo_post(httpd_req_t *req)
 {
-    if (eye_motion_get_mode() != EYE_MODE_CALIBRATE) {
-        return httpd_resp_send_err(req, HTTPD_409_CONFLICT, "not in calibrate mode");
+    if (eye_motion_get_mode() != EYE_MODE_CALIBRATION) {
+        return httpd_resp_send_err(req, HTTPD_409_CONFLICT, "not in calibration mode");
     }
     cJSON *body = NULL;
     if (read_json(req, &body) != ESP_OK) {
         return httpd_resp_send_err(req, HTTPD_400_BAD_REQUEST, "bad json");
     }
-    const cJSON *name = cJSON_GetObjectItemCaseSensitive(body, "axis");
-    int axis = axis_from_name(cJSON_IsString(name) ? name->valuestring : NULL);
-    int us   = (int)json_float(body, "us", 0.0f);
+    int id = jservo(body);
+    float angle = jnum(body, "angle", 90.0f);
     cJSON_Delete(body);
-
-    if (axis < 0 || us <= 0) return httpd_resp_send_err(req, HTTPD_400_BAD_REQUEST, "bad axis or us");
-    eye_servo_set_us((eye_axis_t)axis, (uint16_t)us);
+    if (id < 0) return httpd_resp_send_err(req, HTTPD_400_BAD_REQUEST, "bad servo");
+    eye_servo_write((eye_servo_id_t)id, angle);
     return send_ok(req);
 }
 
-static esp_err_t cal_post(httpd_req_t *req)
+static esp_err_t limits_post(httpd_req_t *req)
 {
     cJSON *body = NULL;
     if (read_json(req, &body) != ESP_OK) {
         return httpd_resp_send_err(req, HTTPD_400_BAD_REQUEST, "bad json");
     }
-    const cJSON *name = cJSON_GetObjectItemCaseSensitive(body, "axis");
-    int axis = axis_from_name(cJSON_IsString(name) ? name->valuestring : NULL);
-    if (axis < 0) {
-        cJSON_Delete(body);
-        return httpd_resp_send_err(req, HTTPD_400_BAD_REQUEST, "bad axis");
-    }
-    eye_servo_cal_t c = eye_servo_get_cal((eye_axis_t)axis);
-    c.min_us    = (uint16_t)json_float(body, "min_us",    c.min_us);
-    c.center_us = (uint16_t)json_float(body, "center_us", c.center_us);
-    c.max_us    = (uint16_t)json_float(body, "max_us",    c.max_us);
-    const cJSON *inv = cJSON_GetObjectItemCaseSensitive(body, "inverted");
-    if (cJSON_IsBool(inv)) c.inverted = cJSON_IsTrue(inv);
+    int id = jservo(body);
+    if (id < 0) { cJSON_Delete(body); return httpd_resp_send_err(req, HTTPD_400_BAD_REQUEST, "bad servo"); }
+    eye_limits_t l = eye_servo_limits((eye_servo_id_t)id);
+    l.min = jnum(body, "min", l.min);
+    l.max = jnum(body, "max", l.max);
     cJSON_Delete(body);
+    eye_servo_set_limits((eye_servo_id_t)id, l);
+    return send_ok(req);
+}
 
-    if (eye_servo_set_cal((eye_axis_t)axis, &c) != ESP_OK) {
-        return httpd_resp_send_err(req, HTTPD_400_BAD_REQUEST, "invalid calibration");
+static esp_err_t cfg_post(httpd_req_t *req)
+{
+    cJSON *body = NULL;
+    if (read_json(req, &body) != ESP_OK) {
+        return httpd_resp_send_err(req, HTTPD_400_BAD_REQUEST, "bad json");
+    }
+    int id = jservo(body);
+    if (id < 0) { cJSON_Delete(body); return httpd_resp_send_err(req, HTTPD_400_BAD_REQUEST, "bad servo"); }
+    eye_servo_cfg_t c = eye_servo_cfg((eye_servo_id_t)id);
+    c.min_us  = (uint16_t)jnum(body, "min_us",  c.min_us);
+    c.max_us  = (uint16_t)jnum(body, "max_us",  c.max_us);
+    c.trim_us = (int16_t) jnum(body, "trim_us", c.trim_us);
+    cJSON_Delete(body);
+    if (eye_servo_set_cfg((eye_servo_id_t)id, c) != ESP_OK) {
+        return httpd_resp_send_err(req, HTTPD_400_BAD_REQUEST, "invalid cfg");
     }
     return send_ok(req);
 }
 
-static esp_err_t cal_save_post(httpd_req_t *req)
+static esp_err_t save_post(httpd_req_t *req)
 {
-    if (eye_servo_save_cal() != ESP_OK) {
+    if (eye_servo_save() != ESP_OK) {
         return httpd_resp_send_err(req, HTTPD_500_INTERNAL_SERVER_ERROR, "nvs write failed");
     }
+    return send_ok(req);
+}
+
+static esp_err_t release_post(httpd_req_t *req)
+{
+    eye_servo_release_all();
     return send_ok(req);
 }
 
@@ -241,25 +236,22 @@ static void wifi_event(void *arg, esp_event_base_t base, int32_t id, void *data)
         esp_wifi_connect();
     } else if (base == WIFI_EVENT && id == WIFI_EVENT_STA_DISCONNECTED) {
         ESP_LOGW(TAG, "disconnected, retrying");
-        xEventGroupClearBits(s_wifi_events, WIFI_CONNECTED_BIT);
         esp_wifi_connect();
     } else if (base == IP_EVENT && id == IP_EVENT_STA_GOT_IP) {
         ip_event_got_ip_t *evt = (ip_event_got_ip_t *)data;
         ESP_LOGI(TAG, "control page: http://" IPSTR "/", IP2STR(&evt->ip_info.ip));
-        xEventGroupSetBits(s_wifi_events, WIFI_CONNECTED_BIT);
     }
 }
 
 static esp_err_t wifi_start(void)
 {
-    s_wifi_events = xEventGroupCreate();
-    ESP_ERROR_CHECK(esp_netif_init());
-    ESP_ERROR_CHECK(esp_event_loop_create_default());
+    ESP_RETURN_ON_ERROR(esp_netif_init(), TAG, "netif");
+    ESP_RETURN_ON_ERROR(esp_event_loop_create_default(), TAG, "event loop");
     esp_netif_t *netif = esp_netif_create_default_wifi_sta();
     esp_netif_set_hostname(netif, EYEMECH_HOSTNAME);
 
     wifi_init_config_t cfg = WIFI_INIT_CONFIG_DEFAULT();
-    ESP_ERROR_CHECK(esp_wifi_init(&cfg));
+    ESP_RETURN_ON_ERROR(esp_wifi_init(&cfg), TAG, "wifi init");
     ESP_ERROR_CHECK(esp_event_handler_instance_register(WIFI_EVENT, ESP_EVENT_ANY_ID, wifi_event, NULL, NULL));
     ESP_ERROR_CHECK(esp_event_handler_instance_register(IP_EVENT, IP_EVENT_STA_GOT_IP, wifi_event, NULL, NULL));
 
@@ -267,24 +259,23 @@ static esp_err_t wifi_start(void)
     strncpy((char *)wc.sta.ssid,     EYEMECH_WIFI_SSID,     sizeof(wc.sta.ssid) - 1);
     strncpy((char *)wc.sta.password, EYEMECH_WIFI_PASSWORD, sizeof(wc.sta.password) - 1);
 
-    ESP_ERROR_CHECK(esp_wifi_set_mode(WIFI_MODE_STA));
-    ESP_ERROR_CHECK(esp_wifi_set_config(WIFI_IF_STA, &wc));
-    ESP_ERROR_CHECK(esp_wifi_start());
-    return ESP_OK;
+    ESP_RETURN_ON_ERROR(esp_wifi_set_mode(WIFI_MODE_STA), TAG, "mode");
+    ESP_RETURN_ON_ERROR(esp_wifi_set_config(WIFI_IF_STA, &wc), TAG, "config");
+    return esp_wifi_start();
 }
 
-/* ------------------------------------------------------------------ start */
-
 static const httpd_uri_t s_routes[] = {
-    { .uri = "/",              .method = HTTP_GET,  .handler = root_get },
-    { .uri = "/api/state",     .method = HTTP_GET,  .handler = state_get },
-    { .uri = "/api/mode",      .method = HTTP_POST, .handler = mode_post },
-    { .uri = "/api/look",      .method = HTTP_POST, .handler = look_post },
-    { .uri = "/api/lids",      .method = HTTP_POST, .handler = lids_post },
-    { .uri = "/api/blink",     .method = HTTP_POST, .handler = blink_post },
-    { .uri = "/api/jog",       .method = HTTP_POST, .handler = jog_post },
-    { .uri = "/api/cal",       .method = HTTP_POST, .handler = cal_post },
-    { .uri = "/api/cal/save",  .method = HTTP_POST, .handler = cal_save_post },
+    { .uri = "/",             .method = HTTP_GET,  .handler = root_get },
+    { .uri = "/api/state",    .method = HTTP_GET,  .handler = state_get },
+    { .uri = "/api/mode",     .method = HTTP_POST, .handler = mode_post },
+    { .uri = "/api/look",     .method = HTTP_POST, .handler = look_post },
+    { .uri = "/api/lid_trim", .method = HTTP_POST, .handler = lid_trim_post },
+    { .uri = "/api/blink",    .method = HTTP_POST, .handler = blink_post },
+    { .uri = "/api/servo",    .method = HTTP_POST, .handler = servo_post },
+    { .uri = "/api/limits",   .method = HTTP_POST, .handler = limits_post },
+    { .uri = "/api/cfg",      .method = HTTP_POST, .handler = cfg_post },
+    { .uri = "/api/save",     .method = HTTP_POST, .handler = save_post },
+    { .uri = "/api/release",  .method = HTTP_POST, .handler = release_post },
 };
 
 esp_err_t eye_web_start(void)

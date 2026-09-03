@@ -5,63 +5,87 @@
 <meta name="viewport" content="width=device-width,initial-scale=1">
 <title>eyemech</title>
 <style>
-  :root { color-scheme: light dark; --bg:#f7f7f5; --fg:#1a1a19; --line:#d8d8d4; --accent:#b5502a; }
-  @media (prefers-color-scheme: dark) { :root { --bg:#16161a; --fg:#e8e8e4; --line:#33333a; --accent:#e08050; } }
+  :root { color-scheme: light dark; --bg:#f7f7f5; --fg:#1a1a19; --dim:#6b6b66;
+          --line:#d8d8d4; --accent:#b5502a; }
+  @media (prefers-color-scheme: dark) {
+    :root { --bg:#16161a; --fg:#e8e8e4; --dim:#9a9a94; --line:#33333a; --accent:#e08050; } }
   body { margin:0; padding:1.25rem; background:var(--bg); color:var(--fg);
-         font:14px/1.5 ui-sans-serif,system-ui,sans-serif; max-width:640px; }
-  h1 { font-size:1.1rem; margin:0 0 1rem; letter-spacing:.02em; }
+         font:14px/1.5 ui-sans-serif,system-ui,sans-serif; max-width:680px; }
+  h1 { font-size:1.05rem; margin:0 0 .25rem; }
+  #sub { color:var(--dim); font-size:.8rem; margin-bottom:1rem; }
   fieldset { border:1px solid var(--line); border-radius:6px; margin:0 0 1rem; padding:.75rem 1rem 1rem; }
-  legend { padding:0 .4rem; font-size:.75rem; text-transform:uppercase; letter-spacing:.08em; opacity:.7; }
-  #pad { width:100%; aspect-ratio:1; border:1px solid var(--line); border-radius:6px;
-         touch-action:none; background:transparent; display:block; }
+  legend { padding:0 .4rem; font-size:.72rem; text-transform:uppercase; letter-spacing:.08em; color:var(--dim); }
+  #pad { width:100%; aspect-ratio:1; max-height:320px; border:1px solid var(--line);
+         border-radius:6px; touch-action:none; display:block; }
   label { display:flex; align-items:center; gap:.6rem; margin:.4rem 0; }
-  label span { min-width:6.5rem; }
+  label span { min-width:5rem; color:var(--dim); }
   input[type=range] { flex:1; accent-color:var(--accent); }
-  button { font:inherit; padding:.35rem .8rem; border:1px solid var(--line);
-           border-radius:5px; background:transparent; color:inherit; cursor:pointer; }
+  button { font:inherit; padding:.3rem .7rem; border:1px solid var(--line); border-radius:5px;
+           background:transparent; color:inherit; cursor:pointer; }
   button:hover { border-color:var(--accent); color:var(--accent); }
-  table { width:100%; border-collapse:collapse; font-variant-numeric:tabular-nums; }
-  th,td { text-align:left; padding:.25rem .4rem; border-bottom:1px solid var(--line); }
-  th { font-weight:500; opacity:.7; font-size:.8rem; }
-  .row { display:flex; gap:.5rem; flex-wrap:wrap; margin-top:.6rem; }
+  button[aria-pressed=true] { border-color:var(--accent); color:var(--accent); font-weight:600; }
+  .row { display:flex; gap:.4rem; flex-wrap:wrap; margin-top:.6rem; }
+  table { width:100%; border-collapse:collapse; font-variant-numeric:tabular-nums; font-size:.85rem; }
+  th,td { text-align:left; padding:.22rem .35rem; border-bottom:1px solid var(--line); }
+  th { font-weight:500; color:var(--dim); font-size:.75rem; }
+  td input { width:4.2rem; font:inherit; padding:.1rem .25rem; background:transparent;
+             color:inherit; border:1px solid var(--line); border-radius:3px; }
+  .warn { color:var(--accent); font-size:.8rem; }
 </style>
 </head>
 <body>
-<h1>eyemech <span id="mode" style="opacity:.6;font-weight:400"></span></h1>
+<h1>eyemech</h1>
+<div id="sub">connecting…</div>
 
 <fieldset>
-  <legend>Gaze</legend>
-  <canvas id="pad"></canvas>
-  <div class="row">
-    <button data-mode="idle">Idle</button>
+  <legend>Mode</legend>
+  <div class="row" id="modes">
+    <button data-mode="tracking">Tracking</button>
+    <button data-mode="auto">Auto</button>
     <button data-mode="manual">Manual</button>
-    <button data-mode="calibrate">Calibrate</button>
-    <button id="blink">Blink</button>
-    <button id="center">Center</button>
+    <button data-mode="calibration">Calibration</button>
   </div>
 </fieldset>
 
 <fieldset>
-  <legend>Lids</legend>
-  <label><span>Upper</span><input type="range" id="upper" min="0" max="1" step="0.01" value="1"></label>
-  <label><span>Lower</span><input type="range" id="lower" min="0" max="1" step="0.01" value="1"></label>
+  <legend>Gaze — drag to look (switches to manual)</legend>
+  <canvas id="pad"></canvas>
+  <div class="row">
+    <button id="blink">Blink</button>
+    <button id="center">Centre</button>
+    <button id="release">Release servos</button>
+  </div>
 </fieldset>
 
 <fieldset>
-  <legend>Axes</legend>
-  <table><thead><tr><th>Axis</th><th>Value</th><th>Pulse</th><th>Min/Ctr/Max</th></tr></thead>
-  <tbody id="axes"></tbody></table>
-  <div class="row"><button id="save">Save calibration to NVS</button></div>
+  <legend>Lid trim — how wide the eyes open</legend>
+  <label><span>Openness</span><input type="range" id="trim" min="0" max="1" step="0.01" value="0.5"></label>
+</fieldset>
+
+<fieldset>
+  <legend>Servos</legend>
+  <p class="warn" id="calnote" hidden>Calibration mode: angle fields write directly to the servo. Small steps.</p>
+  <table>
+    <thead><tr><th>Ch</th><th>Servo</th><th>Angle</th><th>Min</th><th>Max</th><th>Trim µs</th></tr></thead>
+    <tbody id="servos"></tbody>
+  </table>
+  <div class="row"><button id="save">Save to NVS</button></div>
 </fieldset>
 
 <script>
-const post = (path, body) =>
-  fetch(path, { method: 'POST', headers: { 'Content-Type': 'application/json' },
-                body: JSON.stringify(body || {}) });
+const post = (p, b) => fetch(p, { method:'POST', headers:{'Content-Type':'application/json'},
+                                  body: JSON.stringify(b || {}) });
+let state = null, dirty = false;
 
-const pad = document.getElementById('pad');
-const ctx = pad.getContext('2d');
-let gaze = { x: 0, y: 0 };
+/* --- gaze pad ---------------------------------------------------------- */
+const pad = document.getElementById('pad'), ctx = pad.getContext('2d');
+let lr = 90, ud = 90;
+
+function limitsFor(name) {
+  const s = state && state.servos.find(s => s.name === name);
+  if (!s) return [40, 140];
+  return [Math.min(s.min, s.max), Math.max(s.min, s.max)];
+}
 
 function drawPad() {
   const w = pad.width = pad.clientWidth * devicePixelRatio;
@@ -72,47 +96,75 @@ function drawPad() {
   ctx.lineWidth = devicePixelRatio;
   ctx.beginPath(); ctx.moveTo(w/2, 0); ctx.lineTo(w/2, h);
   ctx.moveTo(0, h/2); ctx.lineTo(w, h/2); ctx.stroke();
+
+  const [lrLo, lrHi] = limitsFor('LR'), [udLo, udHi] = limitsFor('UD');
+  const fx = (lr - lrLo) / (lrHi - lrLo), fy = (ud - udLo) / (udHi - udLo);
   ctx.fillStyle = css.getPropertyValue('--accent');
   ctx.beginPath();
-  ctx.arc(w/2 + gaze.x * w/2 * 0.9, h/2 - gaze.y * h/2 * 0.9, 8 * devicePixelRatio, 0, 7);
+  ctx.arc(fx * w, (1 - fy) * h, 9 * devicePixelRatio, 0, 7);
   ctx.fill();
 }
 
 function padMove(ev) {
-  if (ev.buttons === 0 && ev.type === 'pointermove') return;
+  if (ev.type === 'pointermove' && ev.buttons === 0) return;
   const r = pad.getBoundingClientRect();
-  gaze.x = Math.max(-1, Math.min(1, ((ev.clientX - r.left) / r.width  * 2 - 1) / 0.9));
-  gaze.y = Math.max(-1, Math.min(1, -((ev.clientY - r.top) / r.height * 2 - 1) / 0.9));
+  const [lrLo, lrHi] = limitsFor('LR'), [udLo, udHi] = limitsFor('UD');
+  const fx = Math.max(0, Math.min(1, (ev.clientX - r.left) / r.width));
+  const fy = Math.max(0, Math.min(1, 1 - (ev.clientY - r.top) / r.height));
+  lr = lrLo + fx * (lrHi - lrLo);
+  ud = udLo + fy * (udHi - udLo);
   drawPad();
-  post('/api/look', { x: gaze.x, y: gaze.y, speed: 0.3 });
+  post('/api/look', { lr, ud });
 }
 pad.addEventListener('pointerdown', padMove);
 pad.addEventListener('pointermove', padMove);
 addEventListener('resize', drawPad);
 
-document.querySelectorAll('[data-mode]').forEach(b =>
+/* --- controls ---------------------------------------------------------- */
+document.querySelectorAll('#modes button').forEach(b =>
   b.onclick = () => post('/api/mode', { mode: b.dataset.mode }).then(refresh));
-document.getElementById('blink').onclick  = () => post('/api/blink');
-document.getElementById('center').onclick = () => { gaze = { x: 0, y: 0 }; drawPad();
-                                                    post('/api/look', { x: 0, y: 0, speed: 0.4 }); };
-document.getElementById('save').onclick   = () => post('/api/cal/save').then(refresh);
+document.getElementById('blink').onclick   = () => post('/api/blink');
+document.getElementById('release').onclick = () => post('/api/release');
+document.getElementById('save').onclick    = () => post('/api/save').then(refresh);
+document.getElementById('center').onclick  = () => { lr = ud = 90; drawPad(); post('/api/look', { lr, ud }); };
+document.getElementById('trim').oninput    = e => post('/api/lid_trim', { value: +e.target.value });
 
-const sendLids = () => post('/api/lids', {
-  upper: +document.getElementById('upper').value,
-  lower: +document.getElementById('lower').value, speed: 0.4 });
-document.getElementById('upper').oninput = sendLids;
-document.getElementById('lower').oninput = sendLids;
+/* --- servo table ------------------------------------------------------- */
+function rowHtml(s) {
+  const a = Number.isFinite(s.angle) ? s.angle.toFixed(1) : '—';
+  return `<tr data-servo="${s.name}">
+    <td>${s.channel}</td><td>${s.name}</td>
+    <td><input data-f="angle" value="${a}"></td>
+    <td><input data-f="min" value="${s.min}"></td>
+    <td><input data-f="max" value="${s.max}"></td>
+    <td><input data-f="trim_us" value="${s.trim_us}"></td></tr>`;
+}
+
+document.getElementById('servos').addEventListener('focusin', () => dirty = true);
+document.getElementById('servos').addEventListener('change', ev => {
+  const tr = ev.target.closest('tr'), servo = tr.dataset.servo;
+  const f = ev.target.dataset.f, v = parseFloat(ev.target.value);
+  if (!Number.isFinite(v)) return;
+  if (f === 'angle')        post('/api/servo',  { servo, angle: v });
+  else if (f === 'trim_us') post('/api/cfg',    { servo, trim_us: v });
+  else                      post('/api/limits', { servo, [f]: v });
+  dirty = false;
+});
 
 async function refresh() {
   try {
-    const s = await (await fetch('/api/state')).json();
-    document.getElementById('mode').textContent = '· ' + s.mode;
-    document.getElementById('axes').innerHTML = s.axes.map(a =>
-      `<tr><td>${a.name}</td><td>${a.value.toFixed(2)}</td><td>${a.pulse_us} µs</td>
-       <td>${a.min_us}/${a.center_us}/${a.max_us}${a.inverted ? ' inv' : ''}</td></tr>`).join('');
-  } catch (e) { /* board rebooting — next tick will pick it up */ }
+    state = await (await fetch('/api/state')).json();
+    document.getElementById('sub').textContent =
+      `${state.board} · ${state.mode} · vision ${state.vision ? 'detected' : 'absent'}`;
+    document.querySelectorAll('#modes button').forEach(b =>
+      b.setAttribute('aria-pressed', b.dataset.mode === state.mode));
+    document.getElementById('calnote').hidden = state.mode !== 'calibration';
+    if (state.mode !== 'manual') { lr = state.lr; ud = state.ud; }
+    if (!dirty) document.getElementById('servos').innerHTML = state.servos.map(rowHtml).join('');
+    drawPad();
+  } catch (e) { document.getElementById('sub').textContent = 'board unreachable'; }
 }
-drawPad(); refresh(); setInterval(refresh, 1000);
+refresh(); setInterval(refresh, 1000);
 </script>
 </body>
 </html>

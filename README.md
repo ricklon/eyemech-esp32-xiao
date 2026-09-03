@@ -1,64 +1,95 @@
 # eyemech-esp32-xiao
 
-An animatronic eye mechanism on a Seeed Studio XIAO ESP32-S3 — servo motion,
-autonomous idle behavior, and a browser control page for jogging and calibration.
+Will Cogley's animatronic eye mechanism on a Seeed XIAO — six servos on a
+PCA9685, optional face tracking from a Grove Vision AI module, and a browser
+control page.
 
-> **Scaffold.** Structure and APIs are in place; nothing has been built or run on
-> hardware yet, and the pin map, servo endpoints and axis list are placeholders
-> marked `TODO(hardware)`. See [CLAUDE.md](CLAUDE.md) for the open questions.
+Two implementations live here:
 
-## Quick start
+- **`micropython/`** — the working original. XIAO ESP32-C6, MicroPython, three
+  files copied to the board. This runs today.
+- **everything else** — an ESP-IDF C port targeting both the C6 and the S3.
+  Scaffolded, not yet compiled. This is where new work goes.
 
-1. Install [PlatformIO](https://platformio.org/) (VS Code extension or CLI).
-2. `cp components/eye_web/include/secrets.h.example components/eye_web/include/secrets.h`
-   and fill in your WiFi SSID and password.
-3. Plug in the XIAO, then:
+> The port is not built or bench-tested yet. Calibration constants are the
+> original's and assume Will Cogley's linkage geometry. See
+> [CLAUDE.md](CLAUDE.md) for what still has to be measured.
+
+## Hardware
+
+Pin map, power requirements, the mandatory `/OE` pull-up and the bring-up order
+are all in [docs/WIRING.md](docs/WIRING.md). Read it before wiring anything.
+
+The short version: PCA9685 logic from the XIAO's 3V3 pin (which keeps I²C at
+3.3 V and removes any need for a level shifter), servos from a separate 5–6 V
+rail sized for stall, all grounds tied together, 1000 µF across `V+` at the
+PCA9685 itself, and a 10k pull-up from `/OE` to 3V3.
+
+## Running the MicroPython original
 
 ```
-pio run -t upload
+mpremote connect COM5 cp micropython/pca9685.py :
+mpremote connect COM5 cp micropython/servo.py :
+mpremote connect COM5 cp micropython/main.py :
+mpremote connect COM5 repl
+```
+
+`mpremote devs` lists candidate ports. Ctrl-C in the REPL stops `main.py`; the
+servos hold their last position rather than going limp — `pca.all_off()`
+releases them.
+
+## Building the C port
+
+```
+cp components/eye_web/include/secrets.h.example components/eye_web/include/secrets.h
+# fill in WiFi credentials, then:
+pio run -e xiao_esp32c6 -t upload
 pio device monitor
 ```
 
-The serial log prints the control page URL once WiFi associates:
-`http://<ip>/` — or `http://eyemech.local/` if your network resolves mDNS.
+The serial log prints the control page URL once WiFi associates.
 
-## What's in the box
+## Modes
 
-| Path | What it does |
-|---|---|
-| `src/main.c` | Boot sequence: NVS → servos → motion task → WiFi + HTTP |
-| `components/eye_servo/` | LEDC 50 Hz servo driver, per-axis calibration persisted in NVS |
-| `components/eye_motion/` | 50 Hz pose loop: easing, saccades, blinking, three modes |
-| `components/eye_web/` | WiFi station, REST API, single-file embedded control page |
-| `docs/hardware.md` | Pin map, BOM, power notes — fill in as the build firms up |
-| `docs/roadmap.md` | Milestones and backlog |
-| `docs/decisions.md` | Why things are the way they are |
+| Mode | Entered | Behavior |
+|---|---|---|
+| `tracking` | default when a Grove Vision module answers at boot | Follows detected faces, blinks on a wall-clock timer |
+| `auto` | default when no vision module | Random gaze and blink patterns |
+| `manual` | control page, or any `/api/look` | You drive the gaze |
+| `calibration` | control page | Everything to 90° for fitting horns and linkages |
+
+Every mode change runs `neutral()` and clears any half-finished blink.
 
 ## Control API
 
 | Method | Path | Body |
 |---|---|---|
 | GET | `/api/state` | — |
-| POST | `/api/mode` | `{"mode":"idle"\|"manual"\|"calibrate"}` |
-| POST | `/api/look` | `{"x":-1..1,"y":-1..1,"speed":0..1}` |
-| POST | `/api/lids` | `{"upper":0..1,"lower":0..1,"speed":0..1}` |
+| POST | `/api/mode` | `{"mode":"tracking"\|"auto"\|"manual"\|"calibration"}` |
+| POST | `/api/look` | `{"lr":90,"ud":90}` — degrees |
+| POST | `/api/lid_trim` | `{"value":0.5}` — the old trim pot, 0..1 |
 | POST | `/api/blink` | — |
-| POST | `/api/jog` | `{"axis":"pan","us":1500}` — calibrate mode only |
-| POST | `/api/cal` | `{"axis":"pan","min_us":1000,"center_us":1500,"max_us":2000,"inverted":false}` |
-| POST | `/api/cal/save` | — commits calibration to NVS |
+| POST | `/api/servo` | `{"servo":"TL","angle":120}` — calibration mode only |
+| POST | `/api/limits` | `{"servo":"TL","min":90,"max":170}` |
+| POST | `/api/cfg` | `{"servo":"TL","min_us":500,"max_us":2500,"trim_us":0}` |
+| POST | `/api/save` | — commits limits and cfg to NVS |
+| POST | `/api/release` | — all servos limp |
 
-## Calibrating an axis
+`tools/eyectl.py` wraps these for the command line.
 
-Servos strip their gears when driven past a mechanical stop, so work upward
-carefully:
+## Calibrating
 
-1. Switch to calibrate mode (button on the control page, or `POST /api/mode`).
-2. Jog the axis in 25–50 µs steps from 1500 µs, watching the linkage.
-3. Stop at the last position with no binding or buzz — that's your endpoint.
-4. Repeat for the other direction, then set center.
-5. `POST /api/cal` per axis, then **Save calibration to NVS**.
+Servos strip their gears when driven past a mechanical stop, so work up to the
+endpoints rather than guessing at them:
 
-Calibration survives reflashing. It does not survive `pio run -t erase`.
+1. Switch to calibration mode. Everything goes to 90°.
+2. Fit horns and linkages with everything at 90°.
+3. Move one servo at a time in small steps, watching the linkage. Stop at the
+   last position with no binding or buzz — that is the endpoint.
+4. Enter the min/max into the servo table, then **Save to NVS**.
+5. Use `trim_us` for mechanical centring offsets rather than fudging the limits.
+
+Calibration survives reflashing. It does not survive erasing flash.
 
 ## License
 
