@@ -1,0 +1,118 @@
+<!doctype html>
+<html lang="en">
+<head>
+<meta charset="utf-8">
+<meta name="viewport" content="width=device-width,initial-scale=1">
+<title>eyemech</title>
+<style>
+  :root { color-scheme: light dark; --bg:#f7f7f5; --fg:#1a1a19; --line:#d8d8d4; --accent:#b5502a; }
+  @media (prefers-color-scheme: dark) { :root { --bg:#16161a; --fg:#e8e8e4; --line:#33333a; --accent:#e08050; } }
+  body { margin:0; padding:1.25rem; background:var(--bg); color:var(--fg);
+         font:14px/1.5 ui-sans-serif,system-ui,sans-serif; max-width:640px; }
+  h1 { font-size:1.1rem; margin:0 0 1rem; letter-spacing:.02em; }
+  fieldset { border:1px solid var(--line); border-radius:6px; margin:0 0 1rem; padding:.75rem 1rem 1rem; }
+  legend { padding:0 .4rem; font-size:.75rem; text-transform:uppercase; letter-spacing:.08em; opacity:.7; }
+  #pad { width:100%; aspect-ratio:1; border:1px solid var(--line); border-radius:6px;
+         touch-action:none; background:transparent; display:block; }
+  label { display:flex; align-items:center; gap:.6rem; margin:.4rem 0; }
+  label span { min-width:6.5rem; }
+  input[type=range] { flex:1; accent-color:var(--accent); }
+  button { font:inherit; padding:.35rem .8rem; border:1px solid var(--line);
+           border-radius:5px; background:transparent; color:inherit; cursor:pointer; }
+  button:hover { border-color:var(--accent); color:var(--accent); }
+  table { width:100%; border-collapse:collapse; font-variant-numeric:tabular-nums; }
+  th,td { text-align:left; padding:.25rem .4rem; border-bottom:1px solid var(--line); }
+  th { font-weight:500; opacity:.7; font-size:.8rem; }
+  .row { display:flex; gap:.5rem; flex-wrap:wrap; margin-top:.6rem; }
+</style>
+</head>
+<body>
+<h1>eyemech <span id="mode" style="opacity:.6;font-weight:400"></span></h1>
+
+<fieldset>
+  <legend>Gaze</legend>
+  <canvas id="pad"></canvas>
+  <div class="row">
+    <button data-mode="idle">Idle</button>
+    <button data-mode="manual">Manual</button>
+    <button data-mode="calibrate">Calibrate</button>
+    <button id="blink">Blink</button>
+    <button id="center">Center</button>
+  </div>
+</fieldset>
+
+<fieldset>
+  <legend>Lids</legend>
+  <label><span>Upper</span><input type="range" id="upper" min="0" max="1" step="0.01" value="1"></label>
+  <label><span>Lower</span><input type="range" id="lower" min="0" max="1" step="0.01" value="1"></label>
+</fieldset>
+
+<fieldset>
+  <legend>Axes</legend>
+  <table><thead><tr><th>Axis</th><th>Value</th><th>Pulse</th><th>Min/Ctr/Max</th></tr></thead>
+  <tbody id="axes"></tbody></table>
+  <div class="row"><button id="save">Save calibration to NVS</button></div>
+</fieldset>
+
+<script>
+const post = (path, body) =>
+  fetch(path, { method: 'POST', headers: { 'Content-Type': 'application/json' },
+                body: JSON.stringify(body || {}) });
+
+const pad = document.getElementById('pad');
+const ctx = pad.getContext('2d');
+let gaze = { x: 0, y: 0 };
+
+function drawPad() {
+  const w = pad.width = pad.clientWidth * devicePixelRatio;
+  const h = pad.height = pad.clientHeight * devicePixelRatio;
+  const css = getComputedStyle(document.body);
+  ctx.clearRect(0, 0, w, h);
+  ctx.strokeStyle = css.getPropertyValue('--line');
+  ctx.lineWidth = devicePixelRatio;
+  ctx.beginPath(); ctx.moveTo(w/2, 0); ctx.lineTo(w/2, h);
+  ctx.moveTo(0, h/2); ctx.lineTo(w, h/2); ctx.stroke();
+  ctx.fillStyle = css.getPropertyValue('--accent');
+  ctx.beginPath();
+  ctx.arc(w/2 + gaze.x * w/2 * 0.9, h/2 - gaze.y * h/2 * 0.9, 8 * devicePixelRatio, 0, 7);
+  ctx.fill();
+}
+
+function padMove(ev) {
+  if (ev.buttons === 0 && ev.type === 'pointermove') return;
+  const r = pad.getBoundingClientRect();
+  gaze.x = Math.max(-1, Math.min(1, ((ev.clientX - r.left) / r.width  * 2 - 1) / 0.9));
+  gaze.y = Math.max(-1, Math.min(1, -((ev.clientY - r.top) / r.height * 2 - 1) / 0.9));
+  drawPad();
+  post('/api/look', { x: gaze.x, y: gaze.y, speed: 0.3 });
+}
+pad.addEventListener('pointerdown', padMove);
+pad.addEventListener('pointermove', padMove);
+addEventListener('resize', drawPad);
+
+document.querySelectorAll('[data-mode]').forEach(b =>
+  b.onclick = () => post('/api/mode', { mode: b.dataset.mode }).then(refresh));
+document.getElementById('blink').onclick  = () => post('/api/blink');
+document.getElementById('center').onclick = () => { gaze = { x: 0, y: 0 }; drawPad();
+                                                    post('/api/look', { x: 0, y: 0, speed: 0.4 }); };
+document.getElementById('save').onclick   = () => post('/api/cal/save').then(refresh);
+
+const sendLids = () => post('/api/lids', {
+  upper: +document.getElementById('upper').value,
+  lower: +document.getElementById('lower').value, speed: 0.4 });
+document.getElementById('upper').oninput = sendLids;
+document.getElementById('lower').oninput = sendLids;
+
+async function refresh() {
+  try {
+    const s = await (await fetch('/api/state')).json();
+    document.getElementById('mode').textContent = '· ' + s.mode;
+    document.getElementById('axes').innerHTML = s.axes.map(a =>
+      `<tr><td>${a.name}</td><td>${a.value.toFixed(2)}</td><td>${a.pulse_us} µs</td>
+       <td>${a.min_us}/${a.center_us}/${a.max_us}${a.inverted ? ' inv' : ''}</td></tr>`).join('');
+  } catch (e) { /* board rebooting — next tick will pick it up */ }
+}
+drawPad(); refresh(); setInterval(refresh, 1000);
+</script>
+</body>
+</html>

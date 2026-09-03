@@ -1,0 +1,28 @@
+# PlatformIO / ESP-IDF
+.pio/
+.pioenvs/
+.piolibdeps/
+build/
+sdkconfig
+sdkconfig.old
+managed_components/
+dependencies.lock
+
+# Editors
+.vscode/ipch/
+.vscode/c_cpp_properties.json
+.vscode/launch.json
+*.code-workspace
+
+# Secrets — never commit WiFi credentials
+secrets.h
+include/secrets.h
+
+# OS
+Thumbs.db
+desktop.ini
+.DS_Store
+
+# Python
+__pycache__/
+*.pyc
