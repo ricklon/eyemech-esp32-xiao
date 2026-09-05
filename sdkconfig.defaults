@@ -4,6 +4,11 @@
 CONFIG_FREERTOS_HZ=1000
 CONFIG_ESP_MAIN_TASK_STACK_SIZE=8192
 
+# XIAO ESP32-S3/C6 expose the native USB Serial/JTAG device as the convenient
+# monitor port. Keep boot/app logs on the same USB COM port PlatformIO flashes.
+CONFIG_ESP_CONSOLE_USB_SERIAL_JTAG=y
+CONFIG_ESP_CONSOLE_SECONDARY_NONE=y
+
 # Grove Vision AI runs at 921600 baud and overruns a default-sized RX buffer
 # mid-packet, which silently corrupts box parsing. Same failure the MicroPython
 # port hit before rxbuf was raised to 2048.

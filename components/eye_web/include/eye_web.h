@@ -14,6 +14,7 @@
  *   POST /api/cfg         {"servo":"TL","min_us":500,"max_us":2500,"trim_us":0}
  *   POST /api/save        commit limits + cfg to NVS
  *   POST /api/release     all servos limp
+ *   POST /api/wifi        {"ssid":"...","password":"..."} save WiFi, reboot
  */
 #include "esp_err.h"
 

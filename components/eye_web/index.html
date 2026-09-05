@@ -24,12 +24,16 @@
            background:transparent; color:inherit; cursor:pointer; }
   button:hover { border-color:var(--accent); color:var(--accent); }
   button[aria-pressed=true] { border-color:var(--accent); color:var(--accent); font-weight:600; }
+  button.primary { background:var(--accent); border-color:var(--accent); color:white; }
+  button:disabled, input:disabled { opacity:.45; cursor:not-allowed; }
   .row { display:flex; gap:.4rem; flex-wrap:wrap; margin-top:.6rem; }
   table { width:100%; border-collapse:collapse; font-variant-numeric:tabular-nums; font-size:.85rem; }
   th,td { text-align:left; padding:.22rem .35rem; border-bottom:1px solid var(--line); }
   th { font-weight:500; color:var(--dim); font-size:.75rem; }
   td input { width:4.2rem; font:inherit; padding:.1rem .25rem; background:transparent;
              color:inherit; border:1px solid var(--line); border-radius:3px; }
+  input[type=text], input[type=password] { font:inherit; padding:.25rem .4rem; background:transparent;
+             color:inherit; border:1px solid var(--line); border-radius:3px; min-width:14rem; }
   .warn { color:var(--accent); font-size:.8rem; }
 </style>
 </head>
@@ -64,12 +68,26 @@
 
 <fieldset>
   <legend>Servos</legend>
+  <div class="row">
+    <button id="calibrate" class="primary">Calibration</button>
+    <button id="release2">Release servos</button>
+  </div>
   <p class="warn" id="calnote" hidden>Calibration mode: angle fields write directly to the servo. Small steps.</p>
   <table>
     <thead><tr><th>Ch</th><th>Servo</th><th>Angle</th><th>Min</th><th>Max</th><th>Trim µs</th></tr></thead>
     <tbody id="servos"></tbody>
   </table>
   <div class="row"><button id="save">Save to NVS</button></div>
+</fieldset>
+
+<fieldset>
+  <legend>Network</legend>
+  <form id="wifi">
+    <label><span>SSID</span><input type="text" id="wifi_ssid" maxlength="32" autocomplete="off"></label>
+    <label><span>Password</span><input type="password" id="wifi_password" maxlength="64" autocomplete="current-password"></label>
+    <div class="row"><button type="submit">Save WiFi</button></div>
+    <p class="warn" id="wifinote" hidden></p>
+  </form>
 </fieldset>
 
 <script>
@@ -125,16 +143,28 @@ document.querySelectorAll('#modes button').forEach(b =>
   b.onclick = () => post('/api/mode', { mode: b.dataset.mode }).then(refresh));
 document.getElementById('blink').onclick   = () => post('/api/blink');
 document.getElementById('release').onclick = () => post('/api/release');
+document.getElementById('release2').onclick = () => post('/api/release');
 document.getElementById('save').onclick    = () => post('/api/save').then(refresh);
 document.getElementById('center').onclick  = () => { lr = ud = 90; drawPad(); post('/api/look', { lr, ud }); };
 document.getElementById('trim').oninput    = e => post('/api/lid_trim', { value: +e.target.value });
+document.getElementById('calibrate').onclick = () => post('/api/mode', { mode:'calibration' }).then(refresh);
+document.getElementById('wifi').onsubmit = async ev => {
+  ev.preventDefault();
+  const note = document.getElementById('wifinote');
+  note.hidden = false; note.textContent = 'saving WiFi and restarting...';
+  const ssid = document.getElementById('wifi_ssid').value.trim();
+  const password = document.getElementById('wifi_password').value;
+  const r = await post('/api/wifi', { ssid, password });
+  note.textContent = r.ok ? 'restarting...' : 'WiFi save failed';
+};
 
 /* --- servo table ------------------------------------------------------- */
 function rowHtml(s) {
   const a = Number.isFinite(s.angle) ? s.angle.toFixed(1) : '—';
+  const angleDisabled = state.mode === 'calibration' ? '' : ' disabled';
   return `<tr data-servo="${s.name}">
     <td>${s.channel}</td><td>${s.name}</td>
-    <td><input data-f="angle" value="${a}"></td>
+    <td><input data-f="angle" value="${a}"${angleDisabled}></td>
     <td><input data-f="min" value="${s.min}"></td>
     <td><input data-f="max" value="${s.max}"></td>
     <td><input data-f="trim_us" value="${s.trim_us}"></td></tr>`;
@@ -155,10 +185,14 @@ async function refresh() {
   try {
     state = await (await fetch('/api/state')).json();
     document.getElementById('sub').textContent =
-      `${state.board} · ${state.mode} · vision ${state.vision ? 'detected' : 'absent'}`;
+      `${state.board} · ${state.mode} · ${state.wifi_mode} ${state.wifi_ssid} · vision ${state.vision ? 'detected' : 'absent'}`;
     document.querySelectorAll('#modes button').forEach(b =>
       b.setAttribute('aria-pressed', b.dataset.mode === state.mode));
     document.getElementById('calnote').hidden = state.mode !== 'calibration';
+    document.getElementById('calibrate').setAttribute('aria-pressed', state.mode === 'calibration');
+    if (!document.getElementById('wifi_ssid').value) {
+      document.getElementById('wifi_ssid').placeholder = state.wifi_ssid || 'network name';
+    }
     if (state.mode !== 'manual') { lr = state.lr; ud = state.ud; }
     if (!dirty) document.getElementById('servos').innerHTML = state.servos.map(rowHtml).join('');
     drawPad();

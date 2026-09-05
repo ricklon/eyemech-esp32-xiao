@@ -36,8 +36,9 @@ def call(host, path, body=None):
 
 
 def print_state(s):
-    print("{}  mode={}  vision={}  lid_trim={:.2f}".format(
-        s.get("board", "?"), s.get("mode"), s.get("vision"), s.get("lid_trim", 0)))
+    print("{}  mode={}  wifi={} {}  vision={}  lid_trim={:.2f}".format(
+        s.get("board", "?"), s.get("mode"), s.get("wifi_mode", "?"),
+        s.get("wifi_ssid", "?"), s.get("vision"), s.get("lid_trim", 0)))
     print("{:<3} {:<4} {:>8} {:>7} {:>7} {:>8}".format(
         "ch", "name", "angle", "min", "max", "trim_us"))
     for sv in s.get("servos", []):
