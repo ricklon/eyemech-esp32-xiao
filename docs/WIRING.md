@@ -98,6 +98,13 @@ gets there fast.
 - SG90-class: 5 V, 3 A minimum
 - MG90S-class: 6 V, 4–5 A
 
+**This build uses MG90S**, so size for the 6 V, 4–5 A figure. Note what metal
+gears change about failure: an MG90S pushed into a hard stop does not strip
+its gearset the way an SG90 does — it keeps pushing, and what gives instead is
+the servo horn, the linkage, or the printed part it is bolted to. The gearbox
+surviving is not the same as the mechanism surviving, so the "small steps, stop
+at the first sign of binding" rule matters *more* here, not less.
+
 Put a **1000 µF electrolytic across `V+` and `GND` at the PCA9685
 itself**, not back at the supply. Servo current transients are fast and
 the wiring inductance between supply and board will otherwise show up as

@@ -63,6 +63,29 @@ makes the port checkable.
 
 Would revisit if: the mechanism is redesigned and the reference stops mattering.
 
+## 2026-09-05 — UD capped at 138 rather than its true limit
+
+Measured on the real linkage: UD's travel is asymmetric. The bottom is a hard
+stop at 40 (marked 42, two degrees clear so normal use never presses it), while
+the top was still moving freely past 150 — and level gaze sits at servo 90, so
+this is genuine geometry, not a horn fitted a spline off. `trim_us` stays 0.
+
+Capped `max` at 138 anyway, giving 48° each way about 90.
+
+`control_ud_and_lids()` derives `progress` as `(ud - min) / (max - min)`, and the
+four lids track it. The reference table's 40/140 puts level gaze at exactly
+`progress` 0.5. Taking the full 42/150 would move level gaze to 0.444 and leave
+the upper lids around 4% more hooded at rest — a permanent change to the resting
+face, which is the thing the 0.8 / 0.4 coefficients exist to protect.
+
+The cost is 12° of proven upward travel, which is real: up-gaze is expressive.
+
+Would revisit by giving each axis an explicit neutral angle, so `progress` is
+computed about the true mechanical centre instead of the range midpoint. That
+buys full travel *and* the correct resting face, but it changes a formula that
+currently matches the reference line for line, which is the property that makes
+the port checkable at all. Not worth doing mid-calibration.
+
 ## 2026-09-05 — Lid trim scales within the calibration instead of replacing it
 
 `update_eyelid_limits()` in the original rewrote the four lid entries of

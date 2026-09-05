@@ -17,7 +17,11 @@
 - [x] LR (channel 0) centres on command and holds quietly
 - [x] **LR calibrated: 40 / 140, matching the reference table**, measured by
       jogging to each end on the real linkage. Saved to NVS
-- [ ] UD, then the four lids, same way
+- [x] **UD calibrated: 42 / 138.** Bottom is a real hard stop at 40, backed off
+      2°. Top was still free past 150, but capped at 138 to keep level gaze at
+      `progress` 0.5 — see docs/decisions.md
+- [x] Servos identified: **MG90S**
+- [ ] The four lids, same way — note BL and TR run backwards
 - [ ] `!safeboot off` once all six are calibrated
 - [ ] Side-by-side against the MicroPython build: same motion, same blink feel
 

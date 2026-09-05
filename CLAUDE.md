@@ -124,8 +124,10 @@ Do not invent these, and do not carry anything over from the Pico version.
    that never fully close.
 3. **`servo_limits` per axis** — the checked-in values are Will Cogley's and
    assume his linkage geometry.
-4. **Which servos are actually fitted** — SG90 vs MG90S changes both the pulse
-   range and the supply sizing (see `docs/WIRING.md`).
+4. ~~**Which servos are actually fitted**~~ — **MG90S**, confirmed at the bench
+   2026-09-05. Size the supply for 6 V / 4–5 A. Metal gears do not strip the way
+   SG90s do; an MG90S driven into a stop keeps pushing until the horn, linkage
+   or printed part fails instead, so binding is *more* costly here, not less.
 
 The pot endpoints the MicroPython build needed are no longer relevant: the pots
 are gone.
