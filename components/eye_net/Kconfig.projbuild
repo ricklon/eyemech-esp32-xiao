@@ -1,0 +1,38 @@
+menu "eyemech networking"
+
+config EYE_NET_STA_SSID
+    string "Seed station SSID"
+    default ""
+    help
+        Written into profile 1 the first time the device boots with empty NVS.
+        After that NVS wins and this is ignored, so changing a network does not
+        need a reflash. Keep real credentials in sdkconfig, which is gitignored
+        — never in sdkconfig.defaults, which is checked in.
+
+config EYE_NET_STA_PASSWORD
+    string "Seed station password"
+    default ""
+
+config EYE_NET_AP_SSID
+    string "Recovery access-point SSID"
+    default "eyemech-setup"
+    help
+        This access point is up in every station state and is the way back in
+        when no station profile works.
+
+config EYE_NET_AP_PASSWORD
+    string "Recovery access-point password"
+    default "eyemech123"
+    help
+        At least eight characters for WPA2; anything shorter creates an OPEN
+        access point, which lets anyone on it drive the servos.
+
+config EYE_NET_HOSTNAME
+    string "DHCP hostname"
+    default "eyemech"
+    help
+        Offered to the router's DHCP server, which on many home routers makes
+        the device resolvable by name. This is not mDNS: real .local resolution
+        would need the espressif/mdns component.
+
+endmenu

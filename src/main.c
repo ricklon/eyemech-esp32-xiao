@@ -11,6 +11,7 @@
 #include "board_pins.h"
 #include "eye_console.h"
 #include "eye_motion.h"
+#include "eye_net.h"
 #include "eye_servo.h"
 #include "eye_vision.h"
 #include "eye_web.h"
@@ -80,10 +81,17 @@ void app_main(void)
      *    most want to be able to type !release. */
     ESP_ERROR_CHECK_WITHOUT_ABORT(eye_console_start());
 
-    /* 6. WiFi failure is not fatal — the mechanism should still run standalone. */
-    err = eye_web_start();
+    /* 6. Networking, then the HTTP surface on top of it. Neither is fatal —
+     *    the mechanism runs standalone, and the console above is the control
+     *    surface that does not need either of them. */
+    err = eye_net_start();
     if (err != ESP_OK) {
-        ESP_LOGE(TAG, "web control unavailable: %s", esp_err_to_name(err));
+        ESP_LOGE(TAG, "networking unavailable: %s", esp_err_to_name(err));
+    } else {
+        err = eye_web_start();
+        if (err != ESP_OK) {
+            ESP_LOGE(TAG, "web control unavailable: %s", esp_err_to_name(err));
+        }
     }
 
     led_set(false);

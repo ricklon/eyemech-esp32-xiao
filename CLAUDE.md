@@ -27,7 +27,8 @@ Everything else is meant to be behavior-identical to the Python.
    GPIO number outside that file.
 2. **The pots and switches are gone.** Three ADC pots, an enable switch, a mode
    switch and a blink button were the MicroPython control surface. `eye_web`
-   replaces all of them over WiFi. D0–D3, D8 and D9 are now free on both boards.
+   replaces all of them over WiFi, and `eye_console` over the USB cable. D0–D3,
+   D8 and D9 are now free on both boards.
 3. **Calibration persists.** The MicroPython build reflashed to change
    `servo_limits`; the C port stores limits and per-servo pulse config in NVS
    under namespace `eyemech`, editable from the control page.
@@ -41,9 +42,11 @@ pio device monitor                      # 115200
 pio run -e xiao_esp32c6 -t menuconfig   # promote keepers to sdkconfig.defaults
 ```
 
-Before the first build, copy `components/eye_web/include/secrets.h.example` to
-`secrets.h` beside it and fill in WiFi credentials. That file is gitignored —
-never commit it, never paste its contents into a commit message or a doc.
+WiFi credentials are no longer compiled in — `secrets.h` is gone. Set them at
+runtime over the serial console (`!wifi set 1 <ssid> <password>`), where they go
+to NVS. `pio run -t menuconfig` → *eyemech networking* can seed profile 1 for a
+first boot; that lands in the gitignored `sdkconfig`, never in
+`sdkconfig.defaults`. Never paste credentials into a commit message or a doc.
 
 `sdkconfig*` is generated and gitignored; `sdkconfig.defaults` is the checked-in
 source of truth.
@@ -57,7 +60,8 @@ components/pca9685/       port of micropython/pca9685.py, plus /OE control
 components/eye_servo/     port of micropython/servo.py + the servo_limits table
 components/eye_motion/    port of main.py's primitives and mode machine
 components/eye_vision/    port of main.py's Comms class (Grove Vision over UART)
-components/eye_web/       WiFi + HTTP control page; replaces the pots
+components/eye_net/       WiFi: permanent recovery AP + 4 NVS station profiles
+components/eye_web/       HTTP control page; replaces the pots
 components/eye_console/   serial control; the surface that works without WiFi
 micropython/              THE ORIGINAL — reference, not dead code
 docs/WIRING.md            pin map, power, bring-up order, calibration procedure

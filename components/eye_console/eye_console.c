@@ -1,6 +1,7 @@
 #include "eye_console.h"
 #include "board_pins.h"
 #include "eye_motion.h"
+#include "eye_net.h"
 #include "eye_servo.h"
 #include "eye_vision.h"
 
@@ -68,6 +69,14 @@ static void cmd_help(void)
     "  !blink                     queue one blink\r\n"
     "  !trim <0..1>               lid openness\r\n"
     "  !look <lr> <ud>            manual gaze, degrees\r\n"
+    "networking:\r\n"
+    "  !wifi                      link, SSID, IP, access point\r\n"
+    "  !wifi list                 saved profiles\r\n"
+    "  !wifi scan                 nearby networks\r\n"
+    "  !wifi set <n> <ssid> [pw]  save a profile (omit pw if open)\r\n"
+    "  !wifi connect <n>          switch to profile n\r\n"
+    "  !wifi clear <n>            forget profile n\r\n"
+    "  !wifi ap                   stop roaming, stay on the access point\r\n"
     "calibration mode only:\r\n"
     "  !servo <name> <angle>      absolute angle\r\n"
     "  !jog <name> <+/-deg>       step from the last commanded angle\r\n"
@@ -104,6 +113,80 @@ static void cmd_status(void)
                (unsigned)c.min_us, (unsigned)c.max_us, (int)c.trim_us);
     }
     printf("\r\n");
+}
+
+/* !wifi — the reason this console exists. Credentials go in over the cable,
+ * never over the air, and the password is never echoed back. */
+static void cmd_wifi(char **save)
+{
+    const char *sub = next_tok(save);
+    char buf[33];
+
+    if (sub == NULL || !strcmp(sub, "status")) {
+        eye_net_ssid(buf, sizeof(buf));
+        printf("link    : %s\r\n",
+               eye_net_state() == EYE_NET_STA_CONNECTED ? "station" :
+               eye_net_state() == EYE_NET_AP_ONLY       ? "access point only" : "connecting");
+        printf("ssid    : %s\r\n", buf);
+        eye_net_ip(buf, sizeof(buf));
+        printf("ip      : %s\r\n", buf[0] ? buf : "(none)");
+        printf("ap      : %s (%d client(s))\r\n", eye_net_ap_ssid(), eye_net_ap_clients());
+        printf("active  : %d\r\n", eye_net_active_profile() + 1);
+        return;
+    }
+
+    if (!strcmp(sub, "list")) {
+        for (int i = 0; i < EYE_NET_PROFILES; i++) {
+            eye_net_profile_ssid(i, buf, sizeof(buf));
+            printf("  [%d] %s%s\r\n", i + 1, buf[0] ? buf : "(empty)",
+                   i == eye_net_active_profile() ? "   <- boot default" : "");
+        }
+        return;
+    }
+
+    if (!strcmp(sub, "scan")) {
+        if (eye_net_scan_start() != ESP_OK) { printf("scan busy\r\n"); return; }
+        printf("scanning...\r\n");
+        fflush(stdout);
+        for (int i = 0; i < 40 && eye_net_scan_busy(); i++) vTaskDelay(pdMS_TO_TICKS(250));
+        static eye_net_scan_entry_t found[EYE_NET_SCAN_MAX];
+        int n = eye_net_scan_results(found, EYE_NET_SCAN_MAX);
+        if (n == 0) { printf("no networks found\r\n"); return; }
+        for (int i = 0; i < n; i++) {
+            printf("  %-32s %4d dBm  %s\r\n", found[i].ssid, found[i].rssi,
+                   found[i].secure ? "secured" : "open");
+        }
+        return;
+    }
+
+    if (!strcmp(sub, "set")) {
+        const char *slot = next_tok(save);
+        const char *ssid = next_tok(save);
+        const char *pass = next_tok(save);   /* absent = open network */
+        if (!slot || !ssid) {
+            printf("usage: !wifi set <1-%d> <ssid> [password]\r\n", EYE_NET_PROFILES);
+            return;
+        }
+        int n = atoi(slot) - 1;
+        esp_err_t err = eye_net_set_profile(n, ssid, pass ? pass : "");
+        if (err == ESP_OK) printf("profile %d saved — !wifi connect %d\r\n", n + 1, n + 1);
+        else               printf("could not save: %s\r\n", esp_err_to_name(err));
+        return;
+    }
+
+    if (!strcmp(sub, "connect") || !strcmp(sub, "clear")) {
+        const char *slot = next_tok(save);
+        if (!slot) { printf("usage: !wifi %s <1-%d>\r\n", sub, EYE_NET_PROFILES); return; }
+        int n = atoi(slot) - 1;
+        esp_err_t err = (sub[0] == 'c' && sub[1] == 'o')
+                        ? eye_net_connect_profile(n) : eye_net_clear_profile(n);
+        report(sub, err);
+        return;
+    }
+
+    if (!strcmp(sub, "ap")) { report("ap", eye_net_force_ap()); return; }
+
+    printf("usage: !wifi [status|list|scan|set|connect|clear|ap]\r\n");
 }
 
 static void cmd_mode(char **save)
@@ -214,6 +297,7 @@ static void handle(char *line)
     else if (!strcmp(cmd, "engage"))   report("engage",  eye_motion_engage());
     else if (!strcmp(cmd, "blink"))    report("blink",   eye_motion_request_blink());
     else if (!strcmp(cmd, "mode"))     cmd_mode(&save);
+    else if (!strcmp(cmd, "wifi"))     cmd_wifi(&save);
     else if (!strcmp(cmd, "servo"))    cmd_servo(&save);
     else if (!strcmp(cmd, "jog"))      cmd_jog(&save);
     else if (!strcmp(cmd, "mark"))     cmd_mark(&save);

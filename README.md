@@ -41,13 +41,36 @@ releases them.
 ## Building the C port
 
 ```
-cp components/eye_web/include/secrets.h.example components/eye_web/include/secrets.h
-# fill in WiFi credentials, then:
 pio run -e xiao_esp32c6 -t upload
 pio device monitor
 ```
 
-The serial log prints the control page URL once WiFi associates.
+No credentials to fill in first. On a board with nothing stored, the firmware
+brings up a recovery access point — `eyemech-setup`, password `eyemech123` —
+and waits. Join it and browse to <http://192.168.4.1/>, or set a network over
+the serial console:
+
+```
+!wifi scan
+!wifi set 1 "My Network" hunter2
+!wifi connect 1
+```
+
+Credentials go to NVS, so changing networks never needs a reflash.
+
+## Networking
+
+The access point is up in **every** state, including while a station link is
+working, so the mechanism cannot become unreachable because a network changed.
+Four station profiles are stored and swept in turn — three retries each, then
+on to the next — and the list is re-checked every couple of minutes while
+parked on the access point, so a network that drops out is picked back up
+unattended. Only a profile that actually obtained an IP becomes the boot
+default, so a typo does not survive a power cycle.
+
+`eyectl` defaults to the host `eyemech`, which works where the router registers
+DHCP hostnames. There is no mDNS responder, so `eyemech.local` is not
+guaranteed; `--host 192.168.4.1` always works on the recovery AP.
 
 ## Modes
 

@@ -2,6 +2,7 @@
 """eyectl -- drive the eyemech HTTP API from the command line.
 
     python tools/eyectl.py --host 192.168.1.50 state
+    python tools/eyectl.py --host 192.168.4.1 state    # on the recovery AP
     python tools/eyectl.py mode calibration
     python tools/eyectl.py look 110 80
     python tools/eyectl.py servo TL 120        # calibration mode only
@@ -40,6 +41,8 @@ def print_state(s):
     print("{}  mode={}  vision={}  lid_trim={:.2f}{}".format(
         s.get("board", "?"), s.get("mode"), s.get("vision"), s.get("lid_trim", 0),
         "  RELEASED" if s.get("released") else ""))
+    print("link={}  ssid={}  ip={}".format(
+        s.get("link", "?"), s.get("ssid", "?"), s.get("ip") or "-"))
     print("{:<3} {:<4} {:>8} {:>7} {:>7} {:>8}".format(
         "ch", "name", "angle", "min", "max", "trim_us"))
     for sv in s.get("servos", []):
@@ -52,7 +55,11 @@ def print_state(s):
 def main():
     p = argparse.ArgumentParser(description=__doc__,
                                 formatter_class=argparse.RawDescriptionHelpFormatter)
-    p.add_argument("--host", default="eyemech.local")
+    # No default hostname: the firmware sets a DHCP hostname, which many
+    # routers register, but it runs no mDNS responder, so "eyemech.local" is
+    # not guaranteed to resolve. 192.168.4.1 always works on the recovery AP.
+    p.add_argument("--host", default="eyemech",
+                   help="IP or hostname; 192.168.4.1 on the recovery AP")
     sub = p.add_subparsers(dest="cmd", required=True)
 
     sub.add_parser("state")

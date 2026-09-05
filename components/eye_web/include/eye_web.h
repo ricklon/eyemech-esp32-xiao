@@ -1,7 +1,11 @@
 #pragma once
 /*
- * eye_web — WiFi station plus the HTTP control surface that replaced the three
- * ADC pots, the enable switch, the mode switch and the blink button.
+ * eye_web — the HTTP control surface that replaced the three ADC pots, the
+ * enable switch, the mode switch and the blink button.
+ *
+ * Networking is eye_net's job, not this component's; call eye_net_start()
+ * first. That split is what lets the control page stay reachable on the
+ * recovery access point when no station profile works.
  *
  *   GET  /                control + calibration page (embedded, no CDN)
  *   GET  /api/state       mode, per-servo angle/limits/cfg, lid trim, vision

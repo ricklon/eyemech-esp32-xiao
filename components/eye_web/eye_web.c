@@ -1,6 +1,7 @@
 #include "eye_web.h"
 #include "eye_motion.h"
 #include "eye_servo.h"
+#include "eye_net.h"
 #include "eye_vision.h"
 #include "board_pins.h"
 #define EYEMECH_BOARD_NAME BOARD_NAME
@@ -8,21 +9,9 @@
 #include <string.h>
 #include "cJSON.h"
 #include "esp_check.h"
-#include "esp_event.h"
 #include "esp_http_server.h"
 #include "esp_log.h"
-#include "esp_netif.h"
-#include "esp_wifi.h"
 #include "freertos/FreeRTOS.h"
-
-#if __has_include("secrets.h")
-#  include "secrets.h"
-#else
-#  warning "secrets.h missing — copy secrets.h.example and fill in WiFi credentials"
-#  define EYEMECH_WIFI_SSID     ""
-#  define EYEMECH_WIFI_PASSWORD ""
-#  define EYEMECH_HOSTNAME      "eyemech"
-#endif
 
 static const char *TAG = "eye_web";
 
@@ -93,6 +82,15 @@ static esp_err_t state_get(httpd_req_t *req)
     cJSON_AddStringToObject(root, "board", EYEMECH_BOARD_NAME);
     cJSON_AddBoolToObject(root, "vision", eye_vision_present());
     cJSON_AddBoolToObject(root, "released", eye_servo_is_released());
+
+    char buf[33];
+    eye_net_ssid(buf, sizeof(buf));
+    cJSON_AddStringToObject(root, "ssid", buf);
+    eye_net_ip(buf, sizeof(buf));
+    cJSON_AddStringToObject(root, "ip", buf);
+    cJSON_AddStringToObject(root, "link",
+        eye_net_state() == EYE_NET_STA_CONNECTED ? "station" :
+        eye_net_state() == EYE_NET_AP_ONLY       ? "ap" : "connecting");
     cJSON_AddNumberToObject(root, "lid_trim", eye_motion_get_lid_trim());
     cJSON_AddNumberToObject(root, "lr", eye_motion_target_lr());
     cJSON_AddNumberToObject(root, "ud", eye_motion_target_ud());
@@ -243,42 +241,6 @@ static esp_err_t engage_post(httpd_req_t *req)
     return send_ok(req);
 }
 
-/* ------------------------------------------------------------------- wifi */
-
-static void wifi_event(void *arg, esp_event_base_t base, int32_t id, void *data)
-{
-    if (base == WIFI_EVENT && id == WIFI_EVENT_STA_START) {
-        esp_wifi_connect();
-    } else if (base == WIFI_EVENT && id == WIFI_EVENT_STA_DISCONNECTED) {
-        ESP_LOGW(TAG, "disconnected, retrying");
-        esp_wifi_connect();
-    } else if (base == IP_EVENT && id == IP_EVENT_STA_GOT_IP) {
-        ip_event_got_ip_t *evt = (ip_event_got_ip_t *)data;
-        ESP_LOGI(TAG, "control page: http://" IPSTR "/", IP2STR(&evt->ip_info.ip));
-    }
-}
-
-static esp_err_t wifi_start(void)
-{
-    ESP_RETURN_ON_ERROR(esp_netif_init(), TAG, "netif");
-    ESP_RETURN_ON_ERROR(esp_event_loop_create_default(), TAG, "event loop");
-    esp_netif_t *netif = esp_netif_create_default_wifi_sta();
-    esp_netif_set_hostname(netif, EYEMECH_HOSTNAME);
-
-    wifi_init_config_t cfg = WIFI_INIT_CONFIG_DEFAULT();
-    ESP_RETURN_ON_ERROR(esp_wifi_init(&cfg), TAG, "wifi init");
-    ESP_ERROR_CHECK(esp_event_handler_instance_register(WIFI_EVENT, ESP_EVENT_ANY_ID, wifi_event, NULL, NULL));
-    ESP_ERROR_CHECK(esp_event_handler_instance_register(IP_EVENT, IP_EVENT_STA_GOT_IP, wifi_event, NULL, NULL));
-
-    wifi_config_t wc = { 0 };
-    strncpy((char *)wc.sta.ssid,     EYEMECH_WIFI_SSID,     sizeof(wc.sta.ssid) - 1);
-    strncpy((char *)wc.sta.password, EYEMECH_WIFI_PASSWORD, sizeof(wc.sta.password) - 1);
-
-    ESP_RETURN_ON_ERROR(esp_wifi_set_mode(WIFI_MODE_STA), TAG, "mode");
-    ESP_RETURN_ON_ERROR(esp_wifi_set_config(WIFI_IF_STA, &wc), TAG, "config");
-    return esp_wifi_start();
-}
-
 static const httpd_uri_t s_routes[] = {
     { .uri = "/",             .method = HTTP_GET,  .handler = root_get },
     { .uri = "/api/state",    .method = HTTP_GET,  .handler = state_get },
@@ -296,8 +258,9 @@ static const httpd_uri_t s_routes[] = {
 
 esp_err_t eye_web_start(void)
 {
-    ESP_RETURN_ON_ERROR(wifi_start(), TAG, "wifi");
-
+    /* Networking belongs to eye_net, which must already be running: it owns
+     * the APSTA bring-up, so this server is reachable on the recovery AP even
+     * when no station profile works. */
     httpd_handle_t server = NULL;
     httpd_config_t config = HTTPD_DEFAULT_CONFIG();
     config.max_uri_handlers = sizeof(s_routes) / sizeof(s_routes[0]) + 2;
