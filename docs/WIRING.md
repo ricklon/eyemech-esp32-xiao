@@ -98,6 +98,13 @@ gets there fast.
 - SG90-class: 5 V, 3 A minimum
 - MG90S-class: 6 V, 4–5 A
 
+**Lid arms come in A and B variants.** The part that couples the lid linkage to
+the servo horn is printed in two sizes to suit different horn dimensions, and the
+design includes a printed measuring card for working out which one you need.
+Measure the horn against the card and print the matching variant — a reprinted
+arm is not interchangeable if the horn differs. Worth checking before printing a
+spare, since the arm is the part that has failed here.
+
 **Bring-up rule learned the hard way:** after fitting or refitting a horn, move
 the servo by a *single 2° step* and confirm which way the lid travels before
 jogging further. Direction is not predictable from the horn's appearance, and the

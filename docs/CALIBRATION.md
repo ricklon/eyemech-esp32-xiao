@@ -106,17 +106,22 @@ be aware the second one's closed value depends on where you put the first.
 | UD | 42 | 138 | 96° | Bottom is a hard stop at 40, backed off 2°. Top capped — see `decisions.md` |
 | TL | 97 | 9 | 88° | Opens **downward**. Arm reprinted, horn reseated |
 | TR | 89 | 165 | 76° | Opens **upward** |
-| BL | 90 *(assumed)* | 160 | 70° | Closed never hunted |
-| BR | 90 *(assumed)* | 20 | 70° | Closed never hunted |
+| BL | 97 | 160 | 63° | Opens **upward**. Closed where it meets TL |
+| BR | 78 | 20 | 58° | Opens **downward**. Closed where it meets TR |
 
 Stored in NVS, namespace `eyemech`, key `servo_cal_v1`.
 
-**Still outstanding:** BL and BR carry the nominal 90 for closed rather than a
-measured value. Every lid actually hunted came out different from it — TL at 97,
-TR at 89 — so 90 is an assumption in the place it matters most. BR closes against
-TR, which is fully calibrated, so it can be done any time. BL closes against TL,
-and note the circularity: TL's 97 was measured against BL sitting at the assumed
-90, so if BL's real closed differs, TL inherited that error.
+All six axes are measured. Nothing in the table is assumed.
+
+**Not one lid closed at the nominal 90.** TL 97, TR 89, BL 97, BR 78 — the worst
+12° out. Had those been left at the design value, every blink would have driven
+each lid past where it actually meets its partner, several times a minute,
+with nothing in the system able to report the load. Hunting the closed end is the
+single most valuable part of this procedure.
+
+The two left lids meet at 97/97 and the two right at 89/78. The asymmetry between
+sides is expected — the horns are indexed independently — and is why the numbers
+must not be copied across.
 
 ## Things that are not true, that look true
 
