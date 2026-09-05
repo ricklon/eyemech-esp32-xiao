@@ -127,6 +127,17 @@ esp_err_t eye_motion_resume_to_neutral(void)
 esp_err_t eye_motion_engage(void)
 {
     ESP_RETURN_ON_ERROR(eye_servo_engage(), TAG, "engage");
+
+    /* Calibration mode is one servo at a time by definition, and bringing up a
+     * new axis is exactly when commanding all six at once is most likely to
+     * drive something into a hard stop. Release left every channel's full-off
+     * bit set, so leaving them alone here means no pulses at all until an
+     * explicit write -- which is what makes powering the servo rail safe. */
+    if (s_mode == EYE_MODE_CALIBRATION) {
+        ESP_LOGI(TAG, "engaged in calibration — no channel driven until you write one");
+        return ESP_OK;
+    }
+
     /* Unavoidably a move: the mechanism has been limp, so wherever it sagged
      * to is where this starts from, and there is nothing to read back. */
     return eye_motion_neutral();

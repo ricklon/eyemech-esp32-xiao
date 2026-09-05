@@ -64,15 +64,29 @@ void app_main(void)
                                  PCA9685_DEFAULT_OSC_HZ, 50));
     ESP_ERROR_CHECK(eye_servo_init(&s_pca));
 
-    /* 3. Recover that position and ease into neutral rather than commanding it
-     *    outright, which would drive all six servos there at full speed. A
-     *    cold start recovers nothing and goes straight to neutral. */
+    /* 3. Recover where the mechanism is. Read-only; drives nothing. */
     ESP_ERROR_CHECK_WITHOUT_ABORT(eye_servo_resume_from_hardware());
-    ESP_ERROR_CHECK(eye_motion_resume_to_neutral());
 
-    /* 4. Vision decides the default mode, exactly as the original did. */
     bool vision = (eye_vision_init() == ESP_OK);
-    eye_motion_set_mode(vision ? EYE_MODE_TRACKING : EYE_MODE_AUTO);
+
+    if (eye_servo_safe_boot()) {
+        /* Bring-up default: drive nothing at all. Release FIRST so the mode
+         * change below cannot stage a write, then sit in calibration waiting
+         * for an explicit !engage. This is what makes it safe to reset, or to
+         * brown out, with the servo rail live and limits still unmeasured. */
+        eye_servo_release_all();
+        eye_motion_set_mode(EYE_MODE_CALIBRATION);
+        ESP_LOGW(TAG, "SAFE BOOT — servos released, nothing driven. "
+                      "'!engage' then move one axis at a time. "
+                      "'!safeboot off' once limits are calibrated.");
+    } else {
+        /* 4. Ease into neutral rather than commanding it outright, which would
+         *    drive all six servos there at full speed. A cold start recovers
+         *    nothing to ramp from and goes straight to neutral. */
+        ESP_ERROR_CHECK(eye_motion_resume_to_neutral());
+        /* Vision decides the default mode, exactly as the original did. */
+        eye_motion_set_mode(vision ? EYE_MODE_TRACKING : EYE_MODE_AUTO);
+    }
 
     ESP_ERROR_CHECK(eye_motion_start());
 

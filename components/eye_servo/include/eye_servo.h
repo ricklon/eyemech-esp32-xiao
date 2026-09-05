@@ -119,6 +119,18 @@ esp_err_t    eye_servo_set_limits(eye_servo_id_t id, eye_limits_t limits);
 eye_servo_cfg_t eye_servo_cfg(eye_servo_id_t id);
 esp_err_t       eye_servo_set_cfg(eye_servo_id_t id, eye_servo_cfg_t cfg);
 
+/* Safe boot: come up with every channel released and the mode set to
+ * calibration, instead of driving to neutral and starting auto motion.
+ *
+ * Defaults to ON, and should stay on until servo_limits have been measured
+ * against the real linkage. An uncalibrated mechanism that reboots with the
+ * servo rail live otherwise drives all six channels to Will Cogley's angles
+ * within a second of power-up, and a reset is not always something you chose --
+ * a brownout on the servo rail can cause one. Persisted, so it survives the
+ * reset it is protecting against. */
+bool      eye_servo_safe_boot(void);
+esp_err_t eye_servo_set_safe_boot(bool on);
+
 /* Persist limits + cfg to NVS under namespace "eyemech". */
 esp_err_t eye_servo_save(void);
 esp_err_t eye_servo_load(void);

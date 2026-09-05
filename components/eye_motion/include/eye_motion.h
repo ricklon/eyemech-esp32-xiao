@@ -63,7 +63,11 @@ esp_err_t eye_motion_resume_to_neutral(void);
 /* Clear the release latch and command a deliberate position. After a release
  * the servos are limp and, with no feedback, genuinely unknown, so re-enabling
  * the outputs alone would leave them wherever gravity and the linkages left
- * them until something wrote. This engages and goes to neutral in one step. */
+ * them until something wrote. This engages and goes to neutral in one step.
+ *
+ * Except in calibration mode, where it engages and drives NOTHING: bringing up
+ * an axis means one servo at a time, and that is the safe way to have the servo
+ * rail switched on. Write a channel explicitly to start moving it. */
 esp_err_t eye_motion_engage(void);
 esp_err_t eye_motion_blink_now(void);   /* lids to their closed limit           */
 esp_err_t eye_motion_open_lid(void);    /* lids back to their tracked targets   */

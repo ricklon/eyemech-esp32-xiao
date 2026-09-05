@@ -85,6 +85,7 @@ static void cmd_help(void)
     "  !cfg <name> min_us|max_us|trim_us <value>\r\n"
     "  !save                      commit to NVS\r\n"
     "  !defaults                  restore the built-in table (not saved)\r\n"
+    "  !safeboot [on|off]         boot released instead of into motion\r\n"
     "  !reboot\r\n\r\n");
 }
 
@@ -95,6 +96,7 @@ static void cmd_status(void)
            eye_servo_is_released() ? "   *** RELEASED ***" : "");
     printf("vision    : %s\r\n", eye_vision_present() ? "detected" : "absent");
     printf("lid trim  : %.2f\r\n", (double)eye_motion_get_lid_trim());
+    printf("safe boot : %s\r\n", eye_servo_safe_boot() ? "ON (boots released)" : "OFF");
     printf("free heap : %u bytes\r\n", (unsigned)esp_get_free_heap_size());
     printf("%-5s %-3s %9s %8s %8s %8s %8s %8s\r\n",
            "name", "ch", "angle", "min", "max", "min_us", "max_us", "trim_us");
@@ -306,6 +308,15 @@ static void handle(char *line)
     else if (!strcmp(cmd, "limits"))   cmd_limits(&save);
     else if (!strcmp(cmd, "cfg"))      cmd_cfg(&save);
     else if (!strcmp(cmd, "save"))     report("save",     eye_servo_save());
+    else if (!strcmp(cmd, "safeboot")) {
+        const char *v = next_tok(&save);
+        if (v && (!strcmp(v, "on") || !strcmp(v, "off"))) {
+            report("safeboot", eye_servo_set_safe_boot(!strcmp(v, "on")));
+        } else if (v) {
+            printf("usage: !safeboot [on|off]\r\n");
+        }
+        printf("safe boot is %s\r\n", eye_servo_safe_boot() ? "ON" : "OFF");
+    }
     else if (!strcmp(cmd, "defaults")) report("defaults", eye_servo_reset_defaults());
     else if (!strcmp(cmd, "trim")) {
         const char *v = next_tok(&save);

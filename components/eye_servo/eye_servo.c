@@ -8,6 +8,7 @@
 static const char *TAG = "eye_servo";
 #define NVS_NAMESPACE "eyemech"
 #define NVS_KEY_CAL   "servo_cal_v1"
+#define NVS_KEY_SAFE  "safeboot"
 
 static const char *s_names[EYE_SERVO_COUNT] = { "LR", "UD", "TL", "BL", "TR", "BR" };
 
@@ -243,6 +244,28 @@ esp_err_t eye_servo_set_cfg(eye_servo_id_t id, eye_servo_cfg_t cfg)
     s_store.cfg[id] = cfg;
     s_last[id] = NAN;   /* force the next write through */
     return ESP_OK;
+}
+
+bool eye_servo_safe_boot(void)
+{
+    nvs_handle_t h;
+    if (nvs_open(NVS_NAMESPACE, NVS_READONLY, &h) != ESP_OK) return true;
+    uint8_t v = 1;
+    if (nvs_get_u8(h, NVS_KEY_SAFE, &v) != ESP_OK) v = 1;   /* absent = on */
+    nvs_close(h);
+    return v != 0;
+}
+
+esp_err_t eye_servo_set_safe_boot(bool on)
+{
+    nvs_handle_t h;
+    esp_err_t err = nvs_open(NVS_NAMESPACE, NVS_READWRITE, &h);
+    if (err != ESP_OK) return err;
+    err = nvs_set_u8(h, NVS_KEY_SAFE, on ? 1 : 0);
+    if (err == ESP_OK) err = nvs_commit(h);
+    nvs_close(h);
+    ESP_LOGW(TAG, "safe boot %s", on ? "ON — boots released" : "OFF — boots into motion");
+    return err;
 }
 
 esp_err_t eye_servo_save(void)
