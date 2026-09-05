@@ -98,6 +98,13 @@ gets there fast.
 - SG90-class: 5 V, 3 A minimum
 - MG90S-class: 6 V, 4–5 A
 
+**Bring-up rule learned the hard way:** after fitting or refitting a horn, move
+the servo by a *single 2° step* and confirm which way the lid travels before
+jogging further. Direction is not predictable from the horn's appearance, and the
+closing direction has no spare travel — the lid is already against something. A
+lid arm was broken on 2026-09-05 by three 10° steps taken in the closing
+direction on that assumption.
+
 **This build uses MG90S**, so size for the 6 V, 4–5 A figure. Note what metal
 gears change about failure: an MG90S pushed into a hard stop does not strip
 its gearset the way an SG90 does — it keeps pushing, and what gives instead is

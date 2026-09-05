@@ -140,6 +140,14 @@ or current, so there is no stall detection and the only sensor is you watching
 the linkage. Bringing up a new axis: one servo at a time, unloaded first, small
 steps, hand near the supply switch.
 
+**After any mechanical change, establish direction with ONE 2° step before
+jogging.** A lid sits against its closed stop by definition, so the closing
+direction has zero headroom — unlike a gaze axis, which has travel either side of
+centre. Jogging a lid 10° the wrong way is 10° into the eye or the frame, and
+MG90S have the torque to break a printed part rather than stall. A lid arm was
+broken exactly this way on 2026-09-05: horns were refitted, TL was jogged +10
+three times on the assumption that + opened, and + was closing.
+
 `!release` on the serial console is the fast way to make everything go limp, and
 it is the one that does not need the network. `POST /api/release` does the same
 over HTTP. Both latch — nothing moves again, blinks included, until `!engage`.
