@@ -41,6 +41,22 @@ static eye_servo_cfg_t default_cfg(void)
     };
 }
 
+/* A blob written by an older build, or a partly-erased one, can carry spans of
+ * zero. Those divide by zero in eye_servo_write() and produce exactly the
+ * non-finite angles guarded against there, so reject the blob instead of
+ * trusting it. Deliberately does NOT check min < max on the limits: mirrored
+ * servos legitimately invert (see the header). */
+static bool store_is_sane(void)
+{
+    for (int i = 0; i < EYE_SERVO_COUNT; i++) {
+        const eye_servo_cfg_t *c = &s_store.cfg[i];
+        if (c->min_us < 300 || c->max_us > 3000 || c->min_us >= c->max_us) return false;
+        if (!(c->max_angle > c->min_angle)) return false;
+        if (!isfinite(s_store.limits[i].min) || !isfinite(s_store.limits[i].max)) return false;
+    }
+    return true;
+}
+
 esp_err_t eye_servo_reset_defaults(void)
 {
     for (int i = 0; i < EYE_SERVO_COUNT; i++) {
@@ -68,6 +84,20 @@ esp_err_t eye_servo_init(pca9685_t *dev)
 esp_err_t eye_servo_write(eye_servo_id_t id, float angle)
 {
     if (id >= EYE_SERVO_COUNT || s_pca == NULL) return ESP_ERR_INVALID_ARG;
+
+    /* NaN and inf must be rejected before the clamp, not after: every
+     * comparison against NaN is false, so the clamp below passes it straight
+     * through, the isnan() skip below lets it past, and (int)(NaN + 0.5f) is
+     * undefined -- on RISC-V it yields INT_MAX, which pca9685_set_us() clamps
+     * to 4095 ticks, i.e. a ~20 ms pulse in a 20 ms period.
+     *
+     * This is not a theoretical input. NAN is how this module encodes "position
+     * unknown", which is a normal state on feedback-free servos: before the
+     * first write, after a release, and for any channel that
+     * eye_servo_resume_from_hardware() found idle. Anything computing a delta
+     * from eye_servo_read() will produce NaN in those cases. */
+    if (!isfinite(angle)) return ESP_ERR_INVALID_ARG;
+
     const eye_servo_cfg_t *c = &s_store.cfg[id];
 
     if (angle < c->min_angle) angle = c->min_angle;
@@ -187,6 +217,11 @@ esp_err_t eye_servo_load(void)
     if (err == ESP_OK && len != sizeof(s_store)) {
         eye_servo_reset_defaults();
         return ESP_ERR_NVS_INVALID_LENGTH;
+    }
+    if (err == ESP_OK && !store_is_sane()) {
+        ESP_LOGW(TAG, "stored calibration failed validation — using defaults");
+        eye_servo_reset_defaults();
+        return ESP_ERR_INVALID_STATE;
     }
     return err;
 }

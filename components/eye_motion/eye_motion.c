@@ -136,7 +136,18 @@ esp_err_t eye_motion_control_ud_and_lids(float ud_angle)
     eye_limits_t bl = eye_servo_limits(EYE_BL);
     eye_limits_t br = eye_servo_limits(EYE_BR);
 
-    float progress = (ud_angle - ud.min) / (ud.max - ud.min);
+    /* A calibration that left UD's endpoints equal would divide by zero here
+     * and push inf/NaN into all five writes below. Fall back to mid-travel,
+     * which reads as a neutral face rather than lids slammed to one end. */
+    float ud_span = ud.max - ud.min;
+    float progress;
+    if (fabsf(ud_span) < 1e-6f) {
+        static bool warned;
+        if (!warned) { warned = true; ESP_LOGW(TAG, "UD limits are equal — lid tracking disabled"); }
+        progress = 0.5f;
+    } else {
+        progress = (ud_angle - ud.min) / ud_span;
+    }
 
     s_tl_target = tl.max - ((tl.max - tl.min) * (0.8f * (1.0f - progress)));
     s_tr_target = tr.max + ((tr.min - tr.max) * (0.8f * (1.0f - progress)));
