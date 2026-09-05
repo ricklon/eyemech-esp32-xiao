@@ -24,7 +24,12 @@
 - [x] **TL calibrated: 128 / 20.** Mirrored on this build, unlike the reference
       — so three lids run backwards here, not two. Closed is 128, not the
       table's 90; see docs/decisions.md
-- [ ] BL, TR, BR — hunt the closed end on each, do not trust the table's 90
+- [x] **BL calibrated: 40 / 170**, conventional — the reference has it inverted.
+      Closed is where it meets the top lid, found with TL held closed
+- [ ] TR, BR — hunt the closed end on each; predicted TR conventional, BR
+      inverted, if the left pair's mirroring holds
+- [ ] Re-index the lid horns: every lid measured so far uses >100° of servo
+      sweep for a 60–90° arc, leaving no margin at one end
 - [ ] `!safeboot off` once all six are calibrated
 - [ ] Side-by-side against the MicroPython build: same motion, same blink feel
 

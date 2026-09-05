@@ -63,6 +63,32 @@ makes the port checkable.
 
 Would revisit if: the mechanism is redesigned and the reference stops mattering.
 
+## 2026-09-05 — The left lid pair is mirrored as an assembly
+
+`TL` measured `(128, 20)` and `BL` measured `(40, 170)`. Both are the *opposite*
+orientation to the reference table, which has TL conventional `(90, 170)` and BL
+inverted `(90, 10)`.
+
+Two lids each coming out backwards is not two coincidences. The left lid pair is
+mounted mirrored as a unit relative to Will Cogley's build. Channel identity was
+confirmed at the bench for both — ch2 drives the physical top-left lid, ch3 the
+bottom-left — so this is orientation, not a swapped channel map.
+
+Prediction for the right pair, to be tested rather than assumed: the table has
+`TR` inverted and `BR` conventional, so expect `TR` conventional (opens high) and
+`BR` inverted (opens low).
+
+Nothing in the code cares. `clamp_to_limits()` and `lid_open()` both use
+`fminf`/`fmaxf` and never assume an ordering, which is exactly why the table
+entry is written as (closed, open) rather than (low, high).
+
+Separately, both left lids use over 100° of servo sweep — TL 108°, BL 130° — for
+an arc that should take 60–90°, and both run out of room at one end. That points
+at the horns being indexed a few splines off. Worth re-seating before the
+calibration is treated as final: it would put each arc in the middle of the
+servo's travel, leaving margin at both ends and making `trim_us` useful instead
+of already spent.
+
 ## 2026-09-05 — TL is mirrored on this build, and closes at 128 not 90
 
 Measured on hardware. The reference table has `TL = (90, 170)`: closed at 90,
