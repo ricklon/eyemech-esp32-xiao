@@ -14,8 +14,12 @@ implementation** — when the C behaves differently from those three files, the
 Python is right and the C is wrong, unless a deliberate change is recorded in
 `docs/decisions.md`. Do not edit `micropython/` to make the C look correct.
 
-**Status: port scaffolded, never compiled, never run.** Expect the first build to
-fail on include paths and IDF API drift. That is the first job, not a surprise.
+**Status: builds and runs on a XIAO ESP32-S3.** Boot, I²C to the PCA9685 at
+0x40, the register readback, NVS save/load, the serial console, the WiFi profile
+sweep, the AP fallback and mDNS are all bench-verified with the servo rail off.
+**Nothing has been verified with servos powered** — no axis has moved, and every
+calibration constant is still Will Cogley's. The C6 builds but has had no bench
+time.
 
 ## The port's three deliberate changes
 

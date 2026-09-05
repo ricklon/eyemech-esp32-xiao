@@ -11,7 +11,9 @@ Two implementations live here:
 - **everything else** — an ESP-IDF C port targeting both the C6 and the S3.
   Scaffolded, not yet compiled. This is where new work goes.
 
-> The port is not built or bench-tested yet. Calibration constants are the
+> The port builds and runs on a XIAO ESP32-S3, verified with the servo rail
+> switched off: I²C, calibration storage, the serial console, WiFi and mDNS all
+> work. **No servo has been driven yet** — calibration constants are still the
 > original's and assume Will Cogley's linkage geometry. See
 > [CLAUDE.md](CLAUDE.md) for what still has to be measured.
 
