@@ -119,6 +119,27 @@ esp_err_t pca9685_set_us(pca9685_t *dev, uint8_t channel, int us)
     return pca9685_set_pwm(dev, channel, 0, (uint16_t)ticks);
 }
 
+int pca9685_get_us(pca9685_t *dev, uint8_t channel)
+{
+    if (dev == NULL || channel >= PCA9685_CHANNELS) return -1;
+
+    /* OFF_L/OFF_H sit two bytes past this channel's ON_L. */
+    uint8_t reg = (uint8_t)(REG_LED0_ON_L + 4 * channel + 2);
+    uint8_t buf[2] = { 0, 0 };
+    if (i2c_master_transmit_receive(s_dev, &reg, 1, buf, sizeof(buf),
+                                    pdMS_TO_TICKS(50)) != ESP_OK) {
+        return -1;
+    }
+
+    if (buf[1] & 0x10) return 0;   /* full-off bit: channel is released */
+
+    /* 12-bit count: OFF_H bits 3:0 are the high nibble, bit 4 is the flag. */
+    uint16_t off = (uint16_t)buf[0] | (uint16_t)((buf[1] & 0x0F) << 8);
+    if (off == 0) return 0;        /* nothing ever loaded (cold power-on) */
+
+    return (int)((float)off * dev->period_us / 4096.0f + 0.5f);
+}
+
 esp_err_t pca9685_all_off(pca9685_t *dev)
 {
     (void)dev;
@@ -153,15 +174,18 @@ uint32_t pca9685_trim_oscillator(float measured_hz_at_50hz)
 
 esp_err_t pca9685_oe_init(void)
 {
+    /* No internal pull: the board carries an external 10k pull-down, and an
+     * internal pull-up against it would only make a ~0.6 V divider. */
     gpio_config_t cfg = {
         .pin_bit_mask = 1ULL << BOARD_PIN_PCA_OE,
         .mode = GPIO_MODE_OUTPUT,
-        .pull_up_en = GPIO_PULLUP_ENABLE,
     };
     ESP_RETURN_ON_ERROR(gpio_config(&cfg), TAG, "oe gpio");
-    /* Start disabled. The external 10k pull-up covers the bootloader window
-     * when this pin floats; see docs/WIRING.md. */
-    return gpio_set_level(BOARD_PIN_PCA_OE, 1);
+    /* Start ENABLED, matching the pull-down's default. Holding outputs off
+     * across init would drop the servos limp and let them sag, then snap them
+     * back when re-enabled; the pull-down means they instead hold whatever the
+     * PCA9685 was already emitting. See docs/WIRING.md. */
+    return gpio_set_level(BOARD_PIN_PCA_OE, 0);
 }
 
 esp_err_t pca9685_oe_set(bool enabled)

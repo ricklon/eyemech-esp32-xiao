@@ -72,11 +72,24 @@ mirrored relative to their partners. Any code that clamps against these must
 handle either ordering; `eye_motion.c` does it with `fminf`/`fmaxf`. Never
 "fix" the table by swapping the values.
 
-**The `/OE` ordering in `app_main()` is load-bearing.** `/OE` is active low and
-must stay high until every channel holds a position. A 10k pull-up to 3V3 covers
-the bootloader window when the GPIO floats. Without both, the servos slam
-through their linkages at every reset, which is how eye mechanisms lose teeth
-off their gears.
+**`/OE` has a 10k pull-DOWN to GND on this build, not a pull-up.** Outputs are
+therefore enabled by default, through the whole boot window. On a cold start the
+PCA9685's own power-on reset zeroes the `LEDn` registers and sets `SLEEP`, so
+there are no pulses and the servos are limp anyway. On a warm reset the ESP32
+reboots but the PCA9685 does not: it retains its registers and keeps emitting the
+last pulses, so the servos *hold* rather than going limp.
+
+`/OE` was never what prevented the slam. The slam comes from `eye_motion_neutral()`
+writing 90 degrees into all six channels at once, and no `/OE` state stops that.
+Recovering the last commanded position from the `LEDn_OFF` registers and ramping
+to neutral is what stops it — those registers are the only position memory that
+exists, because these servos have no feedback.
+
+What `/OE` is good for is the emergency release: driving D10 high makes every
+output go low instantly, with no I2C transaction, so it still works when the bus
+is wedged or the firmware has crashed. Driving high is safe against the 10k
+pull-down. Do not gate the boot sequence with it — disabling outputs before
+seeding positions makes the servos sag and then snap back.
 
 **`eye_servo_write()` skips redundant writes.** The motion loop rewrites
 identical lid targets constantly and I²C is the bottleneck; the skip is worth

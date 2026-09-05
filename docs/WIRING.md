@@ -18,7 +18,7 @@ Copy all three to the board's filesystem: `pca9685.py`, `servo.py`, `main.py`.
 | D7 (RX) | 17 | Grove Vision **TX** |
 | D8 | 19 | Mode switch → GND |
 | D9 | 20 | Blink button → GND |
-| D10 | 18 | PCA9685 `/OE` |
+| D10 | 18 | PCA9685 `/OE` (optional — emergency release only) |
 | 3V3 | — | PCA9685 VCC, pot high sides, Grove Vision VCC |
 | GND | — | Common ground (mandatory — see below) |
 
@@ -41,16 +41,43 @@ locked to D0/D1/D2. Everything else is placed around them.
 
 Channels 6–15 are free.
 
-## The `/OE` pull-up — do not skip this
+## The `/OE` pull-down
 
-Fit a **10k resistor from `/OE` to 3V3**.
+This build has a **10k resistor from `/OE` to GND**. Note that this is a
+pull-DOWN, the opposite of what earlier revisions of this document (and
+`micropython/main.py`) called for.
 
-`/OE` is active low. During the ESP32's bootloader window, GPIO18 floats;
-the pull-up holds `/OE` high, so the PCA9685's outputs stay Hi-Z and the
-servos stay limp. `main.py` drives it low only after `neutral()` has
-loaded sane positions into every channel. Without the resistor you get a
-full-speed slam through the linkages at every reset, which is how eye
-mechanisms lose teeth off their gears.
+`/OE` is active low, so a pull-down means **outputs are enabled by default**,
+including through the entire boot window. Most Adafruit-pattern PCA9685
+breakouts already carry an onboard pull-down for exactly this reason, so the
+pin works when left unconnected. Do **not** also fit a pull-up to 3V3: against
+an onboard pull-down it forms a divider that puts `/OE` near 1.65 V, between the
+chip's V_IL max (~0.99 V) and V_IH min (~2.31 V), which is an indeterminate
+input and an intermittent fault.
+
+What this means at reset:
+
+- **Cold power-on.** The PCA9685's own power-on reset zeroes the `LEDn`
+  registers and sets `SLEEP`. No pulses are generated regardless of `/OE`, so
+  the servos are limp.
+- **Warm reset.** The ESP32 reboots; the PCA9685 does not. It keeps its
+  registers and keeps emitting the last commanded pulses, so the servos hold
+  position rather than going limp.
+
+Neither case slams. The slam comes from firmware writing 90° into all six
+channels at once, and no `/OE` state prevents that — see the bring-up order
+below.
+
+Because the resistor is 10k rather than a hard tie, D10 can safely drive `/OE`
+high (about 0.33 mA through the resistor). That is worth wiring: it gives an
+instant, asynchronous release that needs no I²C transaction, so it still works
+when the bus is wedged or the firmware has crashed. It is the only stop that
+survives a dead MCU.
+
+Note that with `MODE2` set to `OUTDRV=1, OUTNE=00` — what `pca9685.c` writes —
+disabled outputs are driven **low**, not high-impedance. Low is the right choice
+for servos: a constant low is simply no pulse, where a floating line could pick
+up noise the servos read as one.
 
 ## Power
 
@@ -85,26 +112,20 @@ PWM signal has no reference and servos twitch, buzz, or ignore commands.
 1. Power the logic only. Confirm the PCA9685 answers on I2C:
    `I2C(0, sda=Pin(22), scl=Pin(23), freq=400_000).scan()` should return
    `[64]` (0x40).
-2. Servo supply on, `/OE` still high. Nothing should move.
+2. Servo supply on. Nothing should move: on a cold start the PCA9685
+   generates no pulses until something writes to it.
 3. One servo on channel 0. Run `main.py` in calibration mode (mode switch
    held) and confirm it centres.
 4. Fit horns and linkages with everything at 90°, then add the rest.
 
 ## Calibration you still have to do
 
-**Pot endpoints.** Every ADC constant from the Pico version is void —
-ESP32 ADC is a different animal, and it's nonlinear even with
-`ATTN_11DB`. From the REPL:
-
-```python
-import main
-main.calibrate_pots()
-```
-
-Sweep each pot end to end, note the extremes, and edit `POT_MIN`,
-`POT_MAX`, `TRIM_MIN`, `TRIM_MAX` at the top of `main.py`. The original
-trim range of 7000–14500 was already saturating against its own clamp on
-the Pico, so don't carry those numbers over.
+**Pot endpoints — MicroPython only.** The C port has no pots; `eye_web`
+replaced them. This applies solely to running `micropython/main.py`: sweep each
+pot end to end from the REPL with `main.calibrate_pots()`, then edit `POT_MIN`,
+`POT_MAX`, `TRIM_MIN`, `TRIM_MAX` at the top of `main.py`. The original trim
+range of 7000–14500 was already saturating against its own clamp on the Pico, so
+don't carry those numbers over.
 
 **PCA9685 oscillator.** Clone boards routinely ship with an oscillator
 anywhere from 24 to 27 MHz instead of 25. If servos sit consistently off

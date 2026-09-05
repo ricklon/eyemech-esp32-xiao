@@ -54,6 +54,13 @@ esp_err_t eye_servo_init(pca9685_t *dev);
  * the bottleneck. Do not remove the skip. */
 esp_err_t eye_servo_write(eye_servo_id_t id, float angle);
 
+/* Seed the cached angles from what the PCA9685 is currently emitting, without
+ * writing anything. Use on boot: after a warm reset the chip is still driving
+ * the last commanded pulses, so this recovers the mechanism's real position.
+ * Channels that are not driving stay NAN — genuinely unknown, which is the
+ * honest answer for a servo with no feedback. */
+esp_err_t eye_servo_resume_from_hardware(void);
+
 /* Last commanded angle, or NAN if never written. */
 float eye_servo_read(eye_servo_id_t id);
 

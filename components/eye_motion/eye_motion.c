@@ -63,6 +63,48 @@ esp_err_t eye_motion_neutral(void)
     return ESP_OK;
 }
 
+esp_err_t eye_motion_resume_to_neutral(void)
+{
+    float from[EYE_SERVO_COUNT], to[EYE_SERVO_COUNT];
+    bool  known = true;
+
+    for (int i = 0; i < EYE_SERVO_COUNT; i++) {
+        from[i] = eye_servo_read((eye_servo_id_t)i);
+        if (isnan(from[i])) known = false;
+        to[i] = 90.0f;
+    }
+    const eye_servo_id_t lids[] = { EYE_TL, EYE_BL, EYE_TR, EYE_BR };
+    for (int i = 0; i < 4; i++) {
+        to[lids[i]] = eye_servo_limits(lids[i]).max;   /* open */
+    }
+
+    if (!known) {
+        ESP_LOGI(TAG, "cold start — nothing to resume from, going to neutral");
+        return eye_motion_neutral();
+    }
+
+    const int period_ms = 1000 / EYE_MOTION_TICK_HZ;
+    const int steps = (EYE_RESUME_MS / period_ms) > 0
+                      ? (EYE_RESUME_MS / period_ms) : 1;
+    ESP_LOGI(TAG, "warm start — easing to neutral over %d ms", EYE_RESUME_MS);
+
+    for (int s = 1; s <= steps; s++) {
+        float k = (float)s / (float)steps;
+        for (int i = 0; i < EYE_SERVO_COUNT; i++) {
+            eye_servo_write((eye_servo_id_t)i, from[i] + (to[i] - from[i]) * k);
+        }
+        vTaskDelay(pdMS_TO_TICKS(period_ms));
+    }
+
+    /* Leave the tracked lid targets consistent with where the lids ended up,
+     * so the first open_lid() after a blink doesn't jump. */
+    s_tl_target = to[EYE_TL];
+    s_bl_target = to[EYE_BL];
+    s_tr_target = to[EYE_TR];
+    s_br_target = to[EYE_BR];
+    return ESP_OK;
+}
+
 esp_err_t eye_motion_blink_now(void)
 {
     const eye_servo_id_t lids[] = { EYE_TL, EYE_TR, EYE_BL, EYE_BR };

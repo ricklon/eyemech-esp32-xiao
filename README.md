@@ -17,13 +17,13 @@ Two implementations live here:
 
 ## Hardware
 
-Pin map, power requirements, the mandatory `/OE` pull-up and the bring-up order
+Pin map, power requirements, the `/OE` pull-down and the bring-up order
 are all in [docs/WIRING.md](docs/WIRING.md). Read it before wiring anything.
 
 The short version: PCA9685 logic from the XIAO's 3V3 pin (which keeps I²C at
 3.3 V and removes any need for a level shifter), servos from a separate 5–6 V
 rail sized for stall, all grounds tied together, 1000 µF across `V+` at the
-PCA9685 itself, and a 10k pull-up from `/OE` to 3V3.
+PCA9685 itself, and a 10k pull-down from `/OE` to GND.
 
 ## Running the MicroPython original
 

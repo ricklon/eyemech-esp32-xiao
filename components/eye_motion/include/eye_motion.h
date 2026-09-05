@@ -26,6 +26,11 @@ extern "C" {
 
 #define EYE_MOTION_TICK_HZ   100
 
+/* How long the boot ramp from the recovered position to neutral takes. Long
+ * enough that six servos moving at once look deliberate rather than startled;
+ * short enough that boot is not annoying. */
+#define EYE_RESUME_MS        600
+
 typedef enum {
     EYE_MODE_TRACKING = 0,  /* follow the Grove Vision module, blink on a timer */
     EYE_MODE_AUTO,          /* random gaze and blink — no vision module present  */
@@ -44,6 +49,16 @@ int         eye_motion_mode_from_name(const char *name);  /* -1 if unknown */
 
 esp_err_t eye_motion_calibrate(void);   /* all servos to 90°                    */
 esp_err_t eye_motion_neutral(void);     /* 90°, then lids to their open limit   */
+
+/* Boot path: ease from wherever the mechanism is actually holding to neutral.
+ *
+ * eye_servo_resume_from_hardware() must have run first. When it recovered a
+ * position (warm reset — the PCA9685 kept driving through the reboot) this
+ * interpolates over EYE_RESUME_MS instead of commanding neutral outright, which
+ * would drive all six servos there at full speed. When nothing was recovered
+ * (cold power-on, servos limp and genuinely unknown) it falls back to
+ * eye_motion_neutral(), because there is no start point to ramp from. */
+esp_err_t eye_motion_resume_to_neutral(void);
 esp_err_t eye_motion_blink_now(void);   /* lids to their closed limit           */
 esp_err_t eye_motion_open_lid(void);    /* lids back to their tracked targets   */
 

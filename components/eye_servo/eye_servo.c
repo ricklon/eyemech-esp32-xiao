@@ -87,6 +87,35 @@ esp_err_t eye_servo_write(eye_servo_id_t id, float angle)
     return pca9685_set_us(s_pca, (uint8_t)id, (int)(us + 0.5f));
 }
 
+esp_err_t eye_servo_resume_from_hardware(void)
+{
+    if (s_pca == NULL) return ESP_ERR_INVALID_STATE;
+
+    int recovered = 0;
+    for (int i = 0; i < EYE_SERVO_COUNT; i++) {
+        int us = pca9685_get_us(s_pca, (uint8_t)i);
+        if (us <= 0) { s_last[i] = NAN; continue; }   /* limp or unreadable */
+
+        /* Inverse of the mapping in eye_servo_write(). */
+        const eye_servo_cfg_t *c = &s_store.cfg[i];
+        float span_us    = (float)(c->max_us - c->min_us);
+        float span_angle = c->max_angle - c->min_angle;
+        float angle = c->min_angle +
+                      ((float)us - (float)c->trim_us - (float)c->min_us) *
+                      span_angle / span_us;
+
+        if (angle < c->min_angle) angle = c->min_angle;
+        else if (angle > c->max_angle) angle = c->max_angle;
+
+        s_last[i] = angle;
+        recovered++;
+    }
+
+    ESP_LOGI(TAG, "resumed %d/%d channels from PCA9685 registers",
+             recovered, EYE_SERVO_COUNT);
+    return (recovered > 0) ? ESP_OK : ESP_ERR_NOT_FOUND;
+}
+
 float eye_servo_read(eye_servo_id_t id)
 {
     return (id < EYE_SERVO_COUNT) ? s_last[id] : NAN;
