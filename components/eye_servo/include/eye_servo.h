@@ -90,6 +90,29 @@ esp_err_t eye_servo_release_all(void);
 esp_err_t eye_servo_engage(void);
 bool      eye_servo_is_released(void);
 
+/* --- calibration primitives -------------------------------------------------
+ *
+ * These servos have no feedback: nothing can be read back, and eye_servo_read()
+ * returns the last *commanded* angle rather than a measurement. So calibration
+ * is command-and-confirm — the firmware moves the servo, a human watches the
+ * linkage and says when to stop — not the capture-and-record flow used on
+ * servos that report position (the Feetech units in ~/Projects/lerobot, say).
+ *
+ * There is also no stall detection. A servo driven into a hard stop just heats
+ * and strips. Small steps, one servo at a time, hand near the supply. */
+
+/* Step by a delta from the last commanded angle.
+ *
+ * Refuses with ESP_ERR_INVALID_STATE when the position is unknown — before the
+ * first write, after a release, or on a channel the boot readback found idle.
+ * There is nothing to step *from* in those cases, and on a servo that can be
+ * read you would simply re-read. Seat it with eye_servo_write() first. */
+esp_err_t eye_servo_jog(eye_servo_id_t id, float delta);
+
+/* Record the current commanded angle as this servo's closed (min) or open (max)
+ * endpoint. Does not persist — call eye_servo_save() when the axis is done. */
+esp_err_t eye_servo_mark(eye_servo_id_t id, bool as_max);
+
 eye_limits_t eye_servo_limits(eye_servo_id_t id);
 esp_err_t    eye_servo_set_limits(eye_servo_id_t id, eye_limits_t limits);
 

@@ -58,6 +58,7 @@ components/eye_servo/     port of micropython/servo.py + the servo_limits table
 components/eye_motion/    port of main.py's primitives and mode machine
 components/eye_vision/    port of main.py's Comms class (Grove Vision over UART)
 components/eye_web/       WiFi + HTTP control page; replaces the pots
+components/eye_console/   serial control; the surface that works without WiFi
 micropython/              THE ORIGINAL — reference, not dead code
 docs/WIRING.md            pin map, power, bring-up order, calibration procedure
 docs/PORTING.md           function-by-function map from Python to C
@@ -124,9 +125,19 @@ are gone.
 ## Safety
 
 A servo driven past a mechanical stop stalls, heats and strips its gears within
-seconds. Bringing up a new axis: one servo at a time, unloaded first, small
-steps, hand near the supply switch. `POST /api/release` or driving `/OE` high is
-the fast way to make everything go limp.
+seconds, and these servos have **no feedback** — nothing reports position, load
+or current, so there is no stall detection and the only sensor is you watching
+the linkage. Bringing up a new axis: one servo at a time, unloaded first, small
+steps, hand near the supply switch.
+
+`!release` on the serial console is the fast way to make everything go limp, and
+it is the one that does not need the network. `POST /api/release` does the same
+over HTTP. Both latch — nothing moves again, blinks included, until `!engage`.
+
+Calibration is command-and-confirm, never capture-and-record: the firmware
+commands a position and a human confirms it. Do not carry the calibration flow
+over from `~/Projects/lerobot` — those Feetech servos report position and these
+do not.
 
 ## Working style
 

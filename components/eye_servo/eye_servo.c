@@ -193,6 +193,28 @@ esp_err_t eye_servo_engage(void)
 
 bool eye_servo_is_released(void) { return s_released; }
 
+esp_err_t eye_servo_jog(eye_servo_id_t id, float delta)
+{
+    if (id >= EYE_SERVO_COUNT || !isfinite(delta)) return ESP_ERR_INVALID_ARG;
+    float cur = s_last[id];
+    if (isnan(cur)) return ESP_ERR_INVALID_STATE;   /* nothing to step from */
+    return eye_servo_write(id, cur + delta);
+}
+
+esp_err_t eye_servo_mark(eye_servo_id_t id, bool as_max)
+{
+    if (id >= EYE_SERVO_COUNT) return ESP_ERR_INVALID_ARG;
+    float cur = s_last[id];
+    if (isnan(cur)) return ESP_ERR_INVALID_STATE;
+
+    if (as_max) s_store.limits[id].max = cur;
+    else        s_store.limits[id].min = cur;
+
+    ESP_LOGI(TAG, "%s %s = %.1f (not saved — use save)",
+             s_names[id], as_max ? "max" : "min", (double)cur);
+    return ESP_OK;
+}
+
 eye_limits_t eye_servo_limits(eye_servo_id_t id)
 {
     return (id < EYE_SERVO_COUNT) ? s_store.limits[id] : (eye_limits_t){ 90.0f, 90.0f };

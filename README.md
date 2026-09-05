@@ -78,6 +78,26 @@ Every mode change runs `neutral()` and clears any half-finished blink.
 
 `tools/eyectl.py` wraps these for the command line.
 
+## Serial control
+
+Every endpoint above needs a network. The serial console does not, which matters
+because a mechanism that can strip its own gears should not become
+uncontrollable when WiFi fails to associate. Connect at 115200 and type `!help`:
+
+```
+!status                 mode, release latch, vision, trim, heap, servo table
+!release / !engage      emergency stop (latched), and the way back
+!mode calibration
+!jog TL +5              step from the last commanded angle
+!mark TL max            record where it is now as the open endpoint
+!save                   commit to NVS
+```
+
+Because these servos have no feedback, `!jog` steps from the last *commanded*
+angle rather than a measured one, and refuses when the position is unknown —
+after a release, or before the servo has been seated with `!servo <name>
+<angle>`. `!status` prints `?` rather than a number for those channels.
+
 ## Calibrating
 
 Servos strip their gears when driven past a mechanical stop, so work up to the

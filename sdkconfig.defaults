@@ -19,3 +19,19 @@ CONFIG_ESPTOOLPY_FLASHSIZE_4MB=y
 
 # App partition sizing lives in partitions.csv, wired up via
 # board_build.partitions so PlatformIO's size check agrees with the real table.
+
+# Console on USB-Serial-JTAG, not UART0.
+#
+# Two reasons. First, UART0's default pins collide with the Grove Vision
+# module on both boards: C6 U0TXD/U0RXD are GPIO16/17 and S3's are GPIO43/44,
+# which are exactly D6/D7 in board_pins.h. Second, a XIAO is connected over
+# native USB, and IDF's *secondary* console is output-only — with UART0
+# primary, `pio device monitor` shows logs but nothing you type ever reaches
+# stdin, so eye_console could not work at all.
+#
+# Deliberately NOT installing the usb_serial_jtag VFS driver alongside this:
+# doing so while the console is already on that peripheral causes recursive
+# VFS logging and a boot loop. eye_console polls getchar() instead, which
+# works either way.
+CONFIG_ESP_CONSOLE_USB_SERIAL_JTAG=y
+CONFIG_ESP_CONSOLE_SECONDARY_NONE=y

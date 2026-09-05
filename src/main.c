@@ -9,6 +9,7 @@
  * new positions to all six channels at once — see docs/WIRING.md.
  */
 #include "board_pins.h"
+#include "eye_console.h"
 #include "eye_motion.h"
 #include "eye_servo.h"
 #include "eye_vision.h"
@@ -74,7 +75,12 @@ void app_main(void)
 
     ESP_ERROR_CHECK(eye_motion_start());
 
-    /* WiFi failure is not fatal — the mechanism should still run standalone. */
+    /* 5. Console before WiFi, and never fatal. It is the control surface that
+     *    survives a network that does not come up, which is exactly when you
+     *    most want to be able to type !release. */
+    ESP_ERROR_CHECK_WITHOUT_ABORT(eye_console_start());
+
+    /* 6. WiFi failure is not fatal — the mechanism should still run standalone. */
     err = eye_web_start();
     if (err != ESP_OK) {
         ESP_LOGE(TAG, "web control unavailable: %s", esp_err_to_name(err));
