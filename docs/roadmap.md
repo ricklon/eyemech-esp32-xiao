@@ -9,10 +9,16 @@
 - [x] Bench test: PCA9685 answers on I²C at 0x40 (S3, servo rail off)
 - [x] Serial console, WiFi profile sweep, AP fallback, mDNS, NVS round-trip
 - [x] Warm-boot position recovery from the PCA9685 registers
-- [ ] `/OE`: confirm D10 is wired to it, and that driving it high really does
-      stop the outputs. The GPIO write succeeds; the wire is unverified
-- [ ] One servo on channel 0, unloaded, centres on command
-- [ ] All six servos, calibrate limits with `!jog` / `!mark`, save to NVS
+- [x] `/OE`: **D10 is not wired.** The pull-down holds outputs enabled, so
+      `!release` works entirely through the I²C `all_off()` path. There is no
+      hardware stop; the servo rail switch is the emergency stop
+- [x] Servo rail powered on an assembled mechanism with every channel released
+      — nothing moved, confirming the outputs really are gated
+- [x] LR (channel 0) centres on command and holds quietly
+- [x] **LR calibrated: 40 / 140, matching the reference table**, measured by
+      jogging to each end on the real linkage. Saved to NVS
+- [ ] UD, then the four lids, same way
+- [ ] `!safeboot off` once all six are calibrated
 - [ ] Side-by-side against the MicroPython build: same motion, same blink feel
 
 ## M2 — Behavior parity and beyond
@@ -33,7 +39,12 @@
 ## Open on hardware
 
 - The S3 is the board with bench time. The C6 builds but has not been run.
-- No servo has been powered. Everything about motion is still theory.
+- LR's reference limits proved correct on the real linkage, which is decent
+  evidence the rest of the table is a sound starting point rather than a guess.
+  It is not evidence that any *other* axis is right.
+- Servo type is still unrecorded (SG90 vs MG90S changes pulse range and supply
+  sizing), and `min_us`/`max_us` are still the 500–2500 defaults — untested,
+  since LR reached both reference endpoints without needing them widened.
 - `pca9685_trim_oscillator()` is still dead code: the oscillator has not been
   measured, and there is no way to apply a measurement without a reflash.
 
