@@ -26,14 +26,16 @@
       table's 90; see docs/decisions.md
 - [x] **BL calibrated: 40 / 170**, conventional — the reference has it inverted.
       Closed is where it meets the top lid, found with TL held closed
+- [x] **TR calibrated: 89 / 165.** Closed hunted from above rather than assumed;
+      first lid to come out with a clean 76° arc inside the servo's travel
+- [x] BL open end: **160**. BR open end: **20**. Both closed at 90
 - [ ] **Blocked: TL lid arm broken 2026-09-05, needs reprinting.** Broken by
       jogging 10° steps in the closing direction after a horn refit, before
       direction had been confirmed. See the bring-up rule in docs/WIRING.md
-- [x] Re-index the left lid horns — done, closed now lands at the design's 90
-      rather than 128, giving a correct 80° arc with margin at both ends
-- [ ] Re-measure TL open end once the arm is reprinted (was reading 10–20)
-- [ ] BL: re-measure from scratch; its horn slipped during the first pass
-- [ ] TR, BR — not yet started
+- [ ] BL and BR closed ends: only provisional at 90. A lower lid's closed
+      position is where it meets the upper lid, so BL's needs the reprinted TL
+      arm, and BR's should be hunted against TR the way TR's was
+- [ ] TL: re-measure once the arm is reprinted (open end read 10–20)
 - [ ] `!safeboot off` once all six are calibrated
 - [ ] Side-by-side against the MicroPython build: same motion, same blink feel
 
