@@ -13,7 +13,8 @@
  *   POST /api/limits      {"servo":"TL","min":90,"max":170}
  *   POST /api/cfg         {"servo":"TL","min_us":500,"max_us":2500,"trim_us":0}
  *   POST /api/save        commit limits + cfg to NVS
- *   POST /api/release     all servos limp
+ *   POST /api/release     all servos limp — LATCHES, nothing moves until engage
+ *   POST /api/engage      clear the release latch and go to neutral
  */
 #include "esp_err.h"
 

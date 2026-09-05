@@ -54,7 +54,9 @@
     <button id="blink">Blink</button>
     <button id="center">Centre</button>
     <button id="release">Release servos</button>
+    <button id="engage" hidden>Engage servos</button>
   </div>
+  <p class="warn" id="relnote" hidden>Released: outputs are off and latched. Nothing will move — including blinks — until you engage. Engaging moves the mechanism to neutral from wherever it sagged to.</p>
 </fieldset>
 
 <fieldset>
@@ -125,6 +127,7 @@ document.querySelectorAll('#modes button').forEach(b =>
   b.onclick = () => post('/api/mode', { mode: b.dataset.mode }).then(refresh));
 document.getElementById('blink').onclick   = () => post('/api/blink');
 document.getElementById('release').onclick = () => post('/api/release');
+document.getElementById('engage').onclick  = () => post('/api/engage');
 document.getElementById('save').onclick    = () => post('/api/save').then(refresh);
 document.getElementById('center').onclick  = () => { lr = ud = 90; drawPad(); post('/api/look', { lr, ud }); };
 document.getElementById('trim').oninput    = e => post('/api/lid_trim', { value: +e.target.value });
@@ -159,6 +162,10 @@ async function refresh() {
     document.querySelectorAll('#modes button').forEach(b =>
       b.setAttribute('aria-pressed', b.dataset.mode === state.mode));
     document.getElementById('calnote').hidden = state.mode !== 'calibration';
+    // A latched release is only escapable from here, so the button has to swap.
+    document.getElementById('relnote').hidden  = !state.released;
+    document.getElementById('engage').hidden   = !state.released;
+    document.getElementById('release').hidden  = !!state.released;
     if (state.mode !== 'manual') { lr = state.lr; ud = state.ud; }
     if (!dirty) document.getElementById('servos').innerHTML = state.servos.map(rowHtml).join('');
     drawPad();

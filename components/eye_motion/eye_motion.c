@@ -3,6 +3,7 @@
 
 #include <math.h>
 #include <string.h>
+#include "esp_check.h"
 #include "esp_log.h"
 #include "esp_random.h"
 #include "esp_timer.h"
@@ -103,6 +104,14 @@ esp_err_t eye_motion_resume_to_neutral(void)
     s_tr_target = to[EYE_TR];
     s_br_target = to[EYE_BR];
     return ESP_OK;
+}
+
+esp_err_t eye_motion_engage(void)
+{
+    ESP_RETURN_ON_ERROR(eye_servo_engage(), TAG, "engage");
+    /* Unavoidably a move: the mechanism has been limp, so wherever it sagged
+     * to is where this starts from, and there is nothing to read back. */
+    return eye_motion_neutral();
 }
 
 esp_err_t eye_motion_blink_now(void)

@@ -64,9 +64,31 @@ esp_err_t eye_servo_resume_from_hardware(void);
 /* Last commanded angle, or NAN if never written. */
 float eye_servo_read(eye_servo_id_t id);
 
-/* Stop driving one servo / all servos. They go limp. */
+/* Stop driving one servo. Only meaningful in calibration mode, where the
+ * motion loop is not writing; anywhere else the next tick re-drives it. */
 esp_err_t eye_servo_release(eye_servo_id_t id);
+
+/* Emergency stop, and it LATCHES.
+ *
+ * Drives /OE high first -- instantaneous, no I2C transaction, so it still works
+ * with a wedged bus -- then clears the channels over I2C as well, so the stop
+ * survives someone driving /OE low again. Every subsequent eye_servo_write()
+ * is refused until eye_servo_engage() is called.
+ *
+ * The latch is the point. Without it the motion task simply re-energises the
+ * mechanism on its next tick, and the blink state machine alone will do that
+ * within a few seconds in any mode but calibration.
+ *
+ * Note this discards the position memory in the PCA9685's registers, so a
+ * reboot after a release cannot recover where the mechanism was. That is
+ * honest: once limp, with no feedback, the position genuinely is unknown. */
 esp_err_t eye_servo_release_all(void);
+
+/* Clear the latch and re-enable the outputs. The servos are limp and their
+ * position is unknown, so the caller should command somewhere deliberate
+ * immediately after -- eye_motion_engage() does exactly that. */
+esp_err_t eye_servo_engage(void);
+bool      eye_servo_is_released(void);
 
 eye_limits_t eye_servo_limits(eye_servo_id_t id);
 esp_err_t    eye_servo_set_limits(eye_servo_id_t id, eye_limits_t limits);

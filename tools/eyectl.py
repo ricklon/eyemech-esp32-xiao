@@ -9,7 +9,8 @@
     python tools/eyectl.py cfg TL --trim-us 40
     python tools/eyectl.py trim 0.7
     python tools/eyectl.py save
-    python tools/eyectl.py release
+    python tools/eyectl.py release      # latches; nothing moves until engage
+    python tools/eyectl.py engage
 
 Standard library only -- no pip install needed.
 """
@@ -36,8 +37,9 @@ def call(host, path, body=None):
 
 
 def print_state(s):
-    print("{}  mode={}  vision={}  lid_trim={:.2f}".format(
-        s.get("board", "?"), s.get("mode"), s.get("vision"), s.get("lid_trim", 0)))
+    print("{}  mode={}  vision={}  lid_trim={:.2f}{}".format(
+        s.get("board", "?"), s.get("mode"), s.get("vision"), s.get("lid_trim", 0),
+        "  RELEASED" if s.get("released") else ""))
     print("{:<3} {:<4} {:>8} {:>7} {:>7} {:>8}".format(
         "ch", "name", "angle", "min", "max", "trim_us"))
     for sv in s.get("servos", []):
@@ -57,6 +59,7 @@ def main():
     sub.add_parser("blink")
     sub.add_parser("save")
     sub.add_parser("release")
+    sub.add_parser("engage")
 
     m = sub.add_parser("mode")
     m.add_argument("mode", choices=["tracking", "auto", "manual", "calibration"])
@@ -87,7 +90,7 @@ def main():
 
     if a.cmd == "state":
         print_state(call(a.host, "/api/state"))
-    elif a.cmd in ("blink", "save", "release"):
+    elif a.cmd in ("blink", "save", "release", "engage"):
         call(a.host, "/api/" + a.cmd, {})
     elif a.cmd == "mode":
         call(a.host, "/api/mode", {"mode": a.mode})

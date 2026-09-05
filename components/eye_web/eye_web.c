@@ -92,6 +92,7 @@ static esp_err_t state_get(httpd_req_t *req)
     cJSON_AddStringToObject(root, "mode", eye_motion_mode_name(eye_motion_get_mode()));
     cJSON_AddStringToObject(root, "board", EYEMECH_BOARD_NAME);
     cJSON_AddBoolToObject(root, "vision", eye_vision_present());
+    cJSON_AddBoolToObject(root, "released", eye_servo_is_released());
     cJSON_AddNumberToObject(root, "lid_trim", eye_motion_get_lid_trim());
     cJSON_AddNumberToObject(root, "lr", eye_motion_target_lr());
     cJSON_AddNumberToObject(root, "ud", eye_motion_target_ud());
@@ -234,6 +235,14 @@ static esp_err_t release_post(httpd_req_t *req)
     return send_ok(req);
 }
 
+static esp_err_t engage_post(httpd_req_t *req)
+{
+    if (eye_motion_engage() != ESP_OK) {
+        return httpd_resp_send_err(req, HTTPD_500_INTERNAL_SERVER_ERROR, "engage failed");
+    }
+    return send_ok(req);
+}
+
 /* ------------------------------------------------------------------- wifi */
 
 static void wifi_event(void *arg, esp_event_base_t base, int32_t id, void *data)
@@ -282,6 +291,7 @@ static const httpd_uri_t s_routes[] = {
     { .uri = "/api/cfg",      .method = HTTP_POST, .handler = cfg_post },
     { .uri = "/api/save",     .method = HTTP_POST, .handler = save_post },
     { .uri = "/api/release",  .method = HTTP_POST, .handler = release_post },
+    { .uri = "/api/engage",   .method = HTTP_POST, .handler = engage_post },
 };
 
 esp_err_t eye_web_start(void)

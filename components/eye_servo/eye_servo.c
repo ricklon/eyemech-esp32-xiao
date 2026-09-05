@@ -31,6 +31,7 @@ typedef struct {
 static eye_servo_store_t s_store;
 static float             s_last[EYE_SERVO_COUNT];
 static pca9685_t        *s_pca;
+static bool              s_released;
 
 static eye_servo_cfg_t default_cfg(void)
 {
@@ -98,6 +99,12 @@ esp_err_t eye_servo_write(eye_servo_id_t id, float angle)
      * from eye_servo_read() will produce NaN in those cases. */
     if (!isfinite(angle)) return ESP_ERR_INVALID_ARG;
 
+    /* Refuse everything while released. The latch lives here, at the only
+     * layer that touches the chip, so every caller above is covered without
+     * having to know about it -- including the blink state machine, which is
+     * what silently re-energised the lids a few seconds after a release. */
+    if (s_released) return ESP_ERR_INVALID_STATE;
+
     const eye_servo_cfg_t *c = &s_store.cfg[id];
 
     if (angle < c->min_angle) angle = c->min_angle;
@@ -154,15 +161,37 @@ float eye_servo_read(eye_servo_id_t id)
 esp_err_t eye_servo_release(eye_servo_id_t id)
 {
     if (id >= EYE_SERVO_COUNT) return ESP_ERR_INVALID_ARG;
+    if (s_released) return ESP_OK;
     s_last[id] = NAN;
     return pca9685_set_us(s_pca, (uint8_t)id, 0);
 }
 
 esp_err_t eye_servo_release_all(void)
 {
+    s_released = true;
+
+    /* /OE first: it is a wire, so it acts immediately and works even if the
+     * bus below is wedged. all_off() is then belt and braces. */
+    esp_err_t oe  = pca9685_oe_set(false);
+    esp_err_t off = pca9685_all_off(s_pca);
+
     for (int i = 0; i < EYE_SERVO_COUNT; i++) s_last[i] = NAN;
-    return pca9685_all_off(s_pca);
+
+    ESP_LOGW(TAG, "RELEASED — servos limp and latched (oe %s, all_off %s)",
+             esp_err_to_name(oe), esp_err_to_name(off));
+    return (oe == ESP_OK) ? off : oe;
 }
+
+esp_err_t eye_servo_engage(void)
+{
+    if (!s_released) return ESP_OK;
+    s_released = false;
+    esp_err_t err = pca9685_oe_set(true);
+    ESP_LOGI(TAG, "engaged — outputs live, position unknown until commanded");
+    return err;
+}
+
+bool eye_servo_is_released(void) { return s_released; }
 
 eye_limits_t eye_servo_limits(eye_servo_id_t id)
 {

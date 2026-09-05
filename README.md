@@ -73,7 +73,8 @@ Every mode change runs `neutral()` and clears any half-finished blink.
 | POST | `/api/limits` | `{"servo":"TL","min":90,"max":170}` |
 | POST | `/api/cfg` | `{"servo":"TL","min_us":500,"max_us":2500,"trim_us":0}` |
 | POST | `/api/save` | — commits limits and cfg to NVS |
-| POST | `/api/release` | — all servos limp |
+| POST | `/api/release` | — all servos limp; **latches**, nothing moves until engage |
+| POST | `/api/engage` | — clear the release latch and go to neutral |
 
 `tools/eyectl.py` wraps these for the command line.
 
