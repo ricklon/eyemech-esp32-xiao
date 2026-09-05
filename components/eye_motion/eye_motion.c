@@ -231,8 +231,13 @@ esp_err_t eye_motion_set_mode(eye_mode_t mode)
     s_mode = mode;
     /* Every mode change in the original ended with neutral() and a cleared
      * blink phase. Keep that — it is what stops a half-finished blink from
-     * leaving the lids shut. */
-    eye_motion_neutral();
+     * leaving the lids shut. Calibration seeds 90° instead, once, on entry:
+     * the loop must not keep rewriting it, or direct writes cannot stick. */
+    if (mode == EYE_MODE_CALIBRATION) {
+        eye_motion_calibrate();
+    } else {
+        eye_motion_neutral();
+    }
     s_blink_requested = false;
     ESP_LOGI(TAG, "mode -> %s", eye_motion_mode_name(mode));
     return ESP_OK;
@@ -318,7 +323,12 @@ static void motion_task(void *arg)
             break;
 
         case EYE_MODE_CALIBRATION:
-            eye_motion_calibrate();
+            /* Deliberately nothing. Entering the mode already put every servo
+             * at 90°; calling eye_motion_calibrate() per tick here would
+             * rewrite that 100 times a second and revert every /api/servo
+             * write within 10 ms — which is the only thing this mode exists
+             * to allow. Nothing else moves either: the blink state machine is
+             * skipped in calibration above. */
             break;
         }
 
