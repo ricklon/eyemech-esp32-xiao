@@ -124,19 +124,33 @@ angle rather than a measured one, and refuses when the position is unknown —
 after a release, or before the servo has been seated with `!servo <name>
 <angle>`. `!status` prints `?` rather than a number for those channels.
 
+## Documentation
+
+| Doc | What it covers |
+|---|---|
+| [docs/OPERATION.md](docs/OPERATION.md) | Day-to-day: power-up order, stopping, modes, network, what survives a reflash |
+| [docs/CALIBRATION.md](docs/CALIBRATION.md) | Measuring the limits, the rules that stop it breaking parts, and the measured values |
+| [docs/WIRING.md](docs/WIRING.md) | Pin map, power, `/OE`, bring-up order |
+| [docs/decisions.md](docs/decisions.md) | Why things are the way they are |
+| [docs/roadmap.md](docs/roadmap.md) | What is done and what is next |
+
 ## Calibrating
 
-Servos strip their gears when driven past a mechanical stop, so work up to the
-endpoints rather than guessing at them:
+Full procedure in [docs/CALIBRATION.md](docs/CALIBRATION.md), including the
+measured values for this build. The three rules that matter most, learned at the
+cost of a broken lid arm:
 
-1. Switch to calibration mode. Everything goes to 90°.
-2. Fit horns and linkages with everything at 90°.
-3. Move one servo at a time in small steps, watching the linkage. Stop at the
-   last position with no binding or buzz — that is the endpoint.
-4. Enter the min/max into the servo table, then **Save to NVS**.
-5. Use `trim_us` for mechanical centring offsets rather than fudging the limits.
+1. **Seat the horn before measuring.** Servo at 90, lid just closed. Every lid
+   done this way came out with a clean arc; every lid measured on its as-found
+   horn ran out of travel and eventually slipped or broke.
+2. **Confirm direction with one 2–5° step after any mechanical change.** A lid
+   sits against its stop by definition, so the closing direction has no headroom
+   — 10° the wrong way is 10° into the eye.
+3. **The servo rail switch is the emergency stop.** `/OE` is unwired, so
+   `!release` needs a live MCU and a working I²C bus. The switch does not.
 
-Calibration survives reflashing. It does not survive erasing flash.
+Calibration survives reflashing. It does not survive erasing flash or a change to
+`partitions.csv`.
 
 ## License
 
