@@ -39,6 +39,24 @@ static float clamp_to_limits(eye_servo_id_t id, float v)
     return clampf(v, lo, hi);
 }
 
+/*
+ * Where a lid sits when "open", after the trim.
+ *
+ * The calibrated limits describe the mechanism: .min is fully closed, .max is
+ * fully open, and either may be numerically larger (BL and TR are mirrored).
+ * The trim then picks a point between half-open and fully open, so it scales
+ * within the calibration instead of replacing it.
+ *
+ * The 0.5 floor is what makes this reproduce the original: on the default
+ * table it lands on exactly the hardcoded ranges the trim pot used to write
+ * for TL, BL and TR. BR differs slightly — see docs/decisions.md.
+ */
+static float lid_open(eye_servo_id_t id)
+{
+    eye_limits_t l = eye_servo_limits(id);
+    return l.min + (l.max - l.min) * (0.5f + 0.5f * s_lid_trim);
+}
+
 static uint32_t rand_range(uint32_t lo, uint32_t hi)
 {
     return lo + (esp_random() % (hi - lo + 1));
@@ -59,7 +77,7 @@ esp_err_t eye_motion_neutral(void)
     for (int i = 0; i < EYE_SERVO_COUNT; i++) eye_servo_write((eye_servo_id_t)i, 90.0f);
     const eye_servo_id_t lids[] = { EYE_TL, EYE_BL, EYE_TR, EYE_BR };
     for (int i = 0; i < 4; i++) {
-        eye_servo_write(lids[i], eye_servo_limits(lids[i]).max);   /* open */
+        eye_servo_write(lids[i], lid_open(lids[i]));
     }
     return ESP_OK;
 }
@@ -76,7 +94,7 @@ esp_err_t eye_motion_resume_to_neutral(void)
     }
     const eye_servo_id_t lids[] = { EYE_TL, EYE_BL, EYE_TR, EYE_BR };
     for (int i = 0; i < 4; i++) {
-        to[lids[i]] = eye_servo_limits(lids[i]).max;   /* open */
+        to[lids[i]] = lid_open(lids[i]);
     }
 
     if (!known) {
@@ -158,10 +176,21 @@ esp_err_t eye_motion_control_ud_and_lids(float ud_angle)
         progress = (ud_angle - ud.min) / ud_span;
     }
 
-    s_tl_target = tl.max - ((tl.max - tl.min) * (0.8f * (1.0f - progress)));
-    s_tr_target = tr.max + ((tr.min - tr.max) * (0.8f * (1.0f - progress)));
-    s_bl_target = bl.max + ((bl.min - bl.max) * (0.4f * progress));
-    s_br_target = br.max - ((br.max - br.min) * (0.4f * progress));
+    /* Each lid interpolates from open toward closed. The four expressions were
+     * written two ways in the original (max - (max-min)*k and max + (min-max)*k)
+     * which are the same thing; unified here, with the open end now coming from
+     * lid_open() so the trim no longer has to rewrite the limits. Substituting
+     * the calibrated .max for lid_open() recovers the original exactly.
+     *
+     * 0.8 for the upper lids, 0.4 for the lower ones. These are the character
+     * of the face and are unchanged — see CLAUDE.md. */
+    float tl_open = lid_open(EYE_TL), tr_open = lid_open(EYE_TR);
+    float bl_open = lid_open(EYE_BL), br_open = lid_open(EYE_BR);
+
+    s_tl_target = tl_open + (tl.min - tl_open) * (0.8f * (1.0f - progress));
+    s_tr_target = tr_open + (tr.min - tr_open) * (0.8f * (1.0f - progress));
+    s_bl_target = bl_open + (bl.min - bl_open) * (0.4f * progress);
+    s_br_target = br_open + (br.min - br_open) * (0.4f * progress);
 
     s_y_target = ud_angle;
 
@@ -174,23 +203,21 @@ esp_err_t eye_motion_control_ud_and_lids(float ud_angle)
 }
 
 /*
- * Was update_eyelid_limits(trim_value) driven by the trim pot. Same ranges,
- * now fed a normalized 0..1 from the web UI.
+ * Was update_eyelid_limits(trim_value), driven by the trim pot, which rewrote
+ * the four lid entries in servo_limits outright.
+ *
+ * It cannot do that any more. In the MicroPython build the pot was the only
+ * source of lid limits, so overwriting them was harmless; here servo_limits is
+ * also the calibration table that eye_servo_save() persists, and having the
+ * trim write into it meant one drag of the openness slider replaced measured
+ * endpoints with hardcoded numbers, which the next Save then committed to NVS.
+ *
+ * The trim is now just a stored 0..1 that lid_open() applies. Limits belong to
+ * calibration; openness scales within them.
  */
 esp_err_t eye_motion_set_lid_trim(float progress)
 {
-    progress = clampf(progress, 0.0f, 1.0f);
-    s_lid_trim = progress;
-
-    const float tl_range[2] = { 130.0f, 170.0f };
-    const float br_range[2] = { 130.0f, 170.0f };
-    const float bl_range[2] = {  50.0f,  10.0f };
-    const float tr_range[2] = {  50.0f,  10.0f };
-
-    eye_servo_set_limits(EYE_TL, (eye_limits_t){ 90.0f, tl_range[0] + (tl_range[1] - tl_range[0]) * progress });
-    eye_servo_set_limits(EYE_BR, (eye_limits_t){ 90.0f, br_range[0] + (br_range[1] - br_range[0]) * progress });
-    eye_servo_set_limits(EYE_BL, (eye_limits_t){ 90.0f, bl_range[0] + (bl_range[1] - bl_range[0]) * progress });
-    eye_servo_set_limits(EYE_TR, (eye_limits_t){ 90.0f, tr_range[0] + (tr_range[1] - tr_range[0]) * progress });
+    s_lid_trim = clampf(progress, 0.0f, 1.0f);
     return ESP_OK;
 }
 
