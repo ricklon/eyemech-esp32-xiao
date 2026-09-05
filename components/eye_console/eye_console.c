@@ -69,6 +69,7 @@ static void cmd_help(void)
     "  !blink                     queue one blink\r\n"
     "  !trim <0..1>               lid openness\r\n"
     "  !look <lr> <ud>            manual gaze, degrees\r\n"
+    "  !anim <name>               play an animation (!anim list)\r\n"
     "networking:\r\n"
     "  !wifi                      link, SSID, IP, access point\r\n"
     "  !wifi list                 saved profiles\r\n"
@@ -302,6 +303,20 @@ static void handle(char *line)
     else if (!strcmp(cmd, "blink"))    report("blink",   eye_motion_request_blink());
     else if (!strcmp(cmd, "mode"))     cmd_mode(&save);
     else if (!strcmp(cmd, "wifi"))     cmd_wifi(&save);
+    else if (!strcmp(cmd, "anim")) {
+        const char *name = next_tok(&save);
+        const char *const *all = eye_motion_anim_names();
+        if (name == NULL || !strcmp(name, "list")) {
+            printf("animations:\r\n");
+            for (int i = 0; all[i]; i++) {
+                printf("  %-10s %s\r\n", all[i], eye_motion_anim_desc(all[i]));
+            }
+            return;
+        }
+        esp_err_t err = eye_motion_play(name);
+        if (err == ESP_ERR_NOT_FOUND) printf("no animation '%s' — try !anim list\r\n", name);
+        else                          report("anim", err);
+    }
     else if (!strcmp(cmd, "servo"))    cmd_servo(&save);
     else if (!strcmp(cmd, "jog"))      cmd_jog(&save);
     else if (!strcmp(cmd, "mark"))     cmd_mark(&save);

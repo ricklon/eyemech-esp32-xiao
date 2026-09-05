@@ -22,7 +22,7 @@ static float s_lid_trim = 0.5f;
 static eye_mode_t s_mode = EYE_MODE_AUTO;
 static bool       s_blink_requested;
 
-static const char *s_mode_names[] = { "tracking", "auto", "manual", "calibration" };
+static const char *s_mode_names[] = { "tracking", "auto", "manual", "calibration", "anim" };
 
 static inline float clampf(float v, float lo, float hi)
 {
@@ -66,15 +66,30 @@ static int64_t now_ms(void) { return esp_timer_get_time() / 1000; }
 
 /* --------------------------------------------------------- primitives ---- */
 
+/*
+ * "Everything to 90" is the horn-fitting pose from the original. It has to be
+ * clamped now: once a lid's closed end is measured, 90 is not necessarily
+ * inside its range. Measured on this build BL closes at 97 and BR at 78, so a
+ * raw 90 would drive both 7-12 degrees PAST closed, into the opposing lid --
+ * two powered MG90S pushing against each other with nothing able to report it.
+ */
 esp_err_t eye_motion_calibrate(void)
 {
-    for (int i = 0; i < EYE_SERVO_COUNT; i++) eye_servo_write((eye_servo_id_t)i, 90.0f);
+    for (int i = 0; i < EYE_SERVO_COUNT; i++) {
+        eye_servo_write((eye_servo_id_t)i, clamp_to_limits((eye_servo_id_t)i, 90.0f));
+    }
     return ESP_OK;
 }
 
 esp_err_t eye_motion_neutral(void)
 {
-    for (int i = 0; i < EYE_SERVO_COUNT; i++) eye_servo_write((eye_servo_id_t)i, 90.0f);
+    /* Gaze to centre, lids to their trimmed open position. The lids are written
+     * once, directly to where they belong — the original wrote 90 to all six
+     * first and then corrected the lids, which now means a transient command
+     * outside their measured range. */
+    eye_servo_write(EYE_LR, clamp_to_limits(EYE_LR, 90.0f));
+    eye_servo_write(EYE_UD, clamp_to_limits(EYE_UD, 90.0f));
+
     const eye_servo_id_t lids[] = { EYE_TL, EYE_BL, EYE_TR, EYE_BR };
     for (int i = 0; i < 4; i++) {
         eye_servo_write(lids[i], lid_open(lids[i]));
@@ -254,17 +269,187 @@ esp_err_t eye_motion_request_blink(void) { s_blink_requested = true; return ESP_
 float eye_motion_target_lr(void) { return s_x_target; }
 float eye_motion_target_ud(void) { return s_y_target; }
 
+
+/* ------------------------------------------------------------- animations */
+
+typedef struct {
+    const char        *name;
+    const char        *desc;
+    const eye_frame_t *frames;
+    int                count;
+} eye_anim_t;
+
+/* Frames are normalised: 0 is an axis's `min` end, 1 its `max`. For a lid that
+ * is 0 closed, 1 open, whichever numeric direction that is on this build — so
+ * these sequences survive recalibration and work on the inverted lids. */
+
+static const eye_frame_t s_frames_look[] = {
+    { 0.50f, 0.50f, 1.00f, 400 },   /* open, centred                */
+    { 0.00f, NAN,   NAN,   700 },   /* look left                    */
+    { 1.00f, NAN,   NAN,  1100 },   /* sweep across to the right    */
+    { 0.50f, NAN,   NAN,   600 },   /* back to centre               */
+    { NAN,   NAN,   0.00f, 400 },   /* close                        */
+};
+
+/* A circle in gaze space. lid is NAN throughout so the lids keep tracking UD
+ * through control_ud_and_lids() — the eyes hood as they pass the bottom and
+ * widen over the top, which is most of what makes it read as a roll rather
+ * than a mechanical sweep. */
+static const eye_frame_t s_frames_roll[] = {
+    { 0.50f, 0.50f, 1.00f, 350 },   /* open, centred */
+    { 0.50f, 0.92f, NAN,   350 },   /* up            */
+    { 0.80f, 0.80f, NAN,   200 },
+    { 0.92f, 0.50f, NAN,   200 },   /* right         */
+    { 0.80f, 0.20f, NAN,   200 },
+    { 0.50f, 0.08f, NAN,   200 },   /* down          */
+    { 0.20f, 0.20f, NAN,   200 },
+    { 0.08f, 0.50f, NAN,   200 },   /* left          */
+    { 0.20f, 0.80f, NAN,   200 },
+    { 0.50f, 0.92f, NAN,   200 },   /* back to the top */
+    { 0.50f, 0.50f, NAN,   400 },   /* settle centred  */
+};
+
+#define ANIM(id, d) { #id, d, s_frames_##id, \
+                      (int)(sizeof(s_frames_##id) / sizeof(s_frames_##id[0])) }
+
+static const eye_anim_t s_anims[] = {
+    ANIM(look, "open, look left and right, close"),
+    ANIM(roll, "roll the eyes in a full circle"),
+};
+#define ANIM_COUNT ((int)(sizeof(s_anims) / sizeof(s_anims[0])))
+
+static const eye_anim_t *s_anim;
+static int       s_anim_frame;
+static int64_t   s_anim_started;
+static float     s_from_lr, s_from_ud, s_from_lid;
+static float     s_lid_now = NAN;          /* last commanded lid, NAN = coupled */
+static eye_mode_t s_anim_return = EYE_MODE_AUTO;
+
+static float norm01(eye_servo_id_t id, float deg)
+{
+    eye_limits_t l = eye_servo_limits(id);
+    float span = l.max - l.min;
+    return (fabsf(span) < 1e-6f) ? 0.5f : (deg - l.min) / span;
+}
+
+static float denorm(eye_servo_id_t id, float v)
+{
+    eye_limits_t l = eye_servo_limits(id);
+    return l.min + (l.max - l.min) * v;
+}
+
+static float lerp01(float from, float to, float k)
+{
+    if (isnan(to))   return NAN;    /* frame says hold */
+    if (isnan(from)) return to;     /* nothing to travel from */
+    return from + (to - from) * k;
+}
+
+static void anim_apply(float lr01, float ud01, float lid01)
+{
+    if (!isnan(lr01)) {
+        s_x_target = clamp_to_limits(EYE_LR, denorm(EYE_LR, lr01));
+        eye_servo_write(EYE_LR, s_x_target);
+    }
+    if (!isnan(ud01)) {
+        s_y_target = clamp_to_limits(EYE_UD, denorm(EYE_UD, ud01));
+    }
+
+    if (isnan(lid01)) {
+        /* Let the usual coupling drive the lids off the gaze. */
+        eye_motion_control_ud_and_lids(s_y_target);
+        s_lid_now = NAN;
+    } else {
+        eye_servo_write(EYE_UD, s_y_target);
+        const eye_servo_id_t lids[] = { EYE_TL, EYE_BL, EYE_TR, EYE_BR };
+        for (int i = 0; i < 4; i++) {
+            eye_servo_write(lids[i], denorm(lids[i], lid01));
+        }
+        s_lid_now = lid01;
+    }
+}
+
+static void anim_begin_frame(int64_t t)
+{
+    s_anim_started = t;
+    s_from_lr  = norm01(EYE_LR, s_x_target);
+    s_from_ud  = norm01(EYE_UD, s_y_target);
+    s_from_lid = s_lid_now;
+}
+
+esp_err_t eye_motion_play(const char *name)
+{
+    if (name == NULL) return ESP_ERR_INVALID_ARG;
+    for (int i = 0; i < ANIM_COUNT; i++) {
+        if (strcmp(name, s_anims[i].name) != 0) continue;
+
+        /* Remember where to go back to, but never stack animations. */
+        if (s_mode != EYE_MODE_ANIM) s_anim_return = s_mode;
+        s_anim = &s_anims[i];
+        s_anim_frame = 0;
+        s_blink_requested = false;
+        s_mode = EYE_MODE_ANIM;          /* deliberately not set_mode(): that
+                                          * would run neutral() and jump */
+        anim_begin_frame(now_ms());
+        ESP_LOGI(TAG, "playing '%s' (%d frames)", s_anim->name, s_anim->count);
+        return ESP_OK;
+    }
+    return ESP_ERR_NOT_FOUND;
+}
+
+const char *const *eye_motion_anim_names(void)
+{
+    static const char *names[ANIM_COUNT + 1];
+    for (int i = 0; i < ANIM_COUNT; i++) names[i] = s_anims[i].name;
+    names[ANIM_COUNT] = NULL;
+    return names;
+}
+
+const char *eye_motion_anim_desc(const char *name)
+{
+    for (int i = 0; i < ANIM_COUNT; i++) {
+        if (strcmp(name, s_anims[i].name) == 0) return s_anims[i].desc;
+    }
+    return "";
+}
+
+bool eye_motion_anim_busy(void) { return s_mode == EYE_MODE_ANIM && s_anim != NULL; }
+
+/* One tick of the player. Returns false when the sequence is done. */
+static bool anim_tick(int64_t t)
+{
+    if (s_anim == NULL) return false;
+
+    const eye_frame_t *f = &s_anim->frames[s_anim_frame];
+    int64_t elapsed = t - s_anim_started;
+    float k = (f->ms == 0) ? 1.0f : (float)elapsed / (float)f->ms;
+    if (k > 1.0f) k = 1.0f;
+
+    anim_apply(lerp01(s_from_lr,  f->lr,  k),
+               lerp01(s_from_ud,  f->ud,  k),
+               lerp01(s_from_lid, f->lid, k));
+
+    if (k < 1.0f) return true;
+
+    if (++s_anim_frame >= s_anim->count) {
+        s_anim = NULL;
+        return false;
+    }
+    anim_begin_frame(t);
+    return true;
+}
+
 /* --------------------------------------------------------- mode machine -- */
 
 const char *eye_motion_mode_name(eye_mode_t mode)
 {
-    return (mode <= EYE_MODE_CALIBRATION) ? s_mode_names[mode] : "?";
+    return (mode <= EYE_MODE_ANIM) ? s_mode_names[mode] : "?";
 }
 
 int eye_motion_mode_from_name(const char *name)
 {
     if (name == NULL) return -1;
-    for (int i = 0; i < 4; i++) {
+    for (int i = 0; i < 5; i++) {
         if (strcmp(name, s_mode_names[i]) == 0) return i;
     }
     return -1;
@@ -306,7 +491,7 @@ static void motion_task(void *arg)
 
         /* Blink runs in every mode except calibration, where the whole point is
          * that nothing moves off 90°. */
-        if (s_mode != EYE_MODE_CALIBRATION) {
+        if (s_mode != EYE_MODE_CALIBRATION && s_mode != EYE_MODE_ANIM) {
             if (blink_phase == BLINK_IDLE && (s_blink_requested || t >= next_blink_at)) {
                 s_blink_requested = false;
                 blink_phase = BLINK_CLOSED;
@@ -367,6 +552,15 @@ static void motion_task(void *arg)
         case EYE_MODE_MANUAL:
             /* eye_web writes targets directly; nothing to do per tick beyond
              * the blink state machine above. */
+            break;
+
+        case EYE_MODE_ANIM:
+            if (!anim_tick(t)) {
+                ESP_LOGI(TAG, "animation done — back to %s",
+                         eye_motion_mode_name(s_anim_return));
+                s_mode = EYE_MODE_ANIM;      /* force set_mode to act */
+                eye_motion_set_mode(s_anim_return);
+            }
             break;
 
         case EYE_MODE_CALIBRATION:

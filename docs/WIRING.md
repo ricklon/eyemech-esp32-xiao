@@ -105,6 +105,11 @@ Measure the horn against the card and print the matching variant — a reprinted
 arm is not interchangeable if the horn differs. Worth checking before printing a
 spare, since the arm is the part that has failed here.
 
+**Print lid arms at 0.20 mm layer height in a strength preset.** These are small
+parts under repeated load from a metal-geared servo with no stall detection, so
+layer adhesion matters more than surface finish. The arm that broke was the
+weakest link in the whole mechanism.
+
 **Bring-up rule learned the hard way:** after fitting or refitting a horn, move
 the servo by a *single 2° step* and confirm which way the lid travels before
 jogging further. Direction is not predictable from the horn's appearance, and the

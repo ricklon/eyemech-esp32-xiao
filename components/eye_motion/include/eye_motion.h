@@ -36,7 +36,38 @@ typedef enum {
     EYE_MODE_AUTO,          /* random gaze and blink — no vision module present  */
     EYE_MODE_MANUAL,        /* eye_web is driving                                */
     EYE_MODE_CALIBRATION,   /* everything to 90° for fitting horns and linkages  */
+    EYE_MODE_ANIM,          /* playing a named animation; reverts when finished  */
 } eye_mode_t;
+
+/* --- animations ----------------------------------------------------------
+ *
+ * A keyframe is expressed in NORMALISED units, not degrees, so a sequence
+ * survives recalibration and works on axes whose limits run backwards. 0 is the
+ * `min` end of an axis and 1 the `max` end — for a lid that means 0 closed and
+ * 1 open, whichever numeric direction that happens to be on this build.
+ *
+ * NAN means "leave this alone": for lr/ud, hold the current target; for lid,
+ * let the usual UD coupling in control_ud_and_lids() drive the lids instead of
+ * commanding them, so a gaze move still gets its natural lid tracking.
+ */
+typedef struct {
+    float    lr;    /* 0..1 across the LR limits, NAN to hold          */
+    float    ud;    /* 0..1 across the UD limits, NAN to hold          */
+    float    lid;   /* 0 closed .. 1 open, NAN to follow the UD coupling */
+    uint16_t ms;    /* time to travel from the previous frame to this  */
+} eye_frame_t;
+
+/* Play a named animation. Interrupts whatever is running, then restores the
+ * previous mode when the sequence finishes. Unknown name returns
+ * ESP_ERR_NOT_FOUND. */
+esp_err_t eye_motion_play(const char *name);
+
+/* NULL-terminated list of built-in animation names, for help text and the UI. */
+const char *const *eye_motion_anim_names(void);
+const char        *eye_motion_anim_desc(const char *name);
+
+/* True while a sequence is running. */
+bool eye_motion_anim_busy(void);
 
 esp_err_t eye_motion_start(void);
 
