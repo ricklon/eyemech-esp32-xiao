@@ -21,7 +21,10 @@
       2°. Top was still free past 150, but capped at 138 to keep level gaze at
       `progress` 0.5 — see docs/decisions.md
 - [x] Servos identified: **MG90S**
-- [ ] The four lids, same way — note BL and TR run backwards
+- [x] **TL calibrated: 128 / 20.** Mirrored on this build, unlike the reference
+      — so three lids run backwards here, not two. Closed is 128, not the
+      table's 90; see docs/decisions.md
+- [ ] BL, TR, BR — hunt the closed end on each, do not trust the table's 90
 - [ ] `!safeboot off` once all six are calibrated
 - [ ] Side-by-side against the MicroPython build: same motion, same blink feel
 

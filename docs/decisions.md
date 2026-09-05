@@ -63,6 +63,32 @@ makes the port checkable.
 
 Would revisit if: the mechanism is redesigned and the reference stops mattering.
 
+## 2026-09-05 — TL is mirrored on this build, and closes at 128 not 90
+
+Measured on hardware. The reference table has `TL = (90, 170)`: closed at 90,
+opening as the angle rises, with only `BL` and `TR` running backwards. On this
+mechanism TL runs backwards too. Measured value is `(128, 20)` — closed at 128,
+wide open at 20.
+
+So **three** of the four lids are mirrored here, not two. The channel map is not
+at fault: channel 2 was confirmed at the bench to drive the physical top-left
+lid. It is a mounting inversion on that servo.
+
+The code needed no change. `clamp_to_limits()` uses `fminf`/`fmaxf`, and
+`lid_open()` interpolates from `min` toward `max` without assuming an ordering,
+so an inverted pair works exactly as the existing BL/TR entries do. This is the
+payoff for the standing rule against "normalizing" that table.
+
+The closed value matters more than the inversion. An early reading suggested TL
+was closed at 160; hunting for the *first* angle that shuts the lid found 128.
+`eye_motion_blink_now()` drives to `min` on every blink, several times a minute,
+so a `min` of 160 would have pressed 32° past shut into the eyeball on every one
+of them — silently, since MG90S have the torque to keep pushing and nothing here
+reports load.
+
+Consequence for the remaining lids: the reference's closed value of 90 is not
+trustworthy on this build. Each lid gets its closed end hunted for, not assumed.
+
 ## 2026-09-05 — UD capped at 138 rather than its true limit
 
 Measured on the real linkage: UD's travel is asymmetric. The bottom is a hard
