@@ -13,8 +13,10 @@ CONFIG_UART_ISR_IN_IRAM=y
 CONFIG_HTTPD_MAX_REQ_HDR_LEN=1024
 CONFIG_HTTPD_MAX_URI_LEN=512
 
-# Both XIAO variants ship 4MB flash; the IDF default of 2MB triggers a
-# size-mismatch warning and wastes half the part.
+# The C6 ships 4MB. The S3 ships 8MB and is corrected in
+# sdkconfig.defaults.esp32s3, which ESP-IDF loads on top of this file for that
+# target. The IDF default of 2MB would trigger a size-mismatch warning and
+# waste most of either part.
 CONFIG_ESPTOOLPY_FLASHSIZE_4MB=y
 
 # App partition sizing lives in partitions.csv, wired up via

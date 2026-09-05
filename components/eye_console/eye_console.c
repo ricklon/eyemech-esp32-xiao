@@ -131,7 +131,9 @@ static void cmd_wifi(char **save)
         eye_net_ip(buf, sizeof(buf));
         printf("ip      : %s\r\n", buf[0] ? buf : "(none)");
         printf("ap      : %s (%d client(s))\r\n", eye_net_ap_ssid(), eye_net_ap_clients());
-        printf("active  : %d\r\n", eye_net_active_profile() + 1);
+        int act = eye_net_active_profile();
+        if (act < 0) printf("active  : none yet\r\n");
+        else         printf("active  : profile %d\r\n", act + 1);
         return;
     }
 

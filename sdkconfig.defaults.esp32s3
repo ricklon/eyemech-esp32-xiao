@@ -1,0 +1,8 @@
+# S3-only overrides, layered on sdkconfig.defaults by ESP-IDF's automatic
+# sdkconfig.defaults.<target> mechanism.
+
+# The XIAO ESP32-S3 has 8MB of flash. Inheriting the C6's 4MB from the shared
+# defaults makes PlatformIO warn ("Flash memory size mismatch detected.
+# Expected 8MB, found 4MB") and hides half the part.
+CONFIG_ESPTOOLPY_FLASHSIZE_4MB=n
+CONFIG_ESPTOOLPY_FLASHSIZE_8MB=y
