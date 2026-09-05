@@ -28,11 +28,11 @@ config EYE_NET_AP_PASSWORD
         access point, which lets anyone on it drive the servos.
 
 config EYE_NET_HOSTNAME
-    string "DHCP hostname"
+    string "Hostname"
     default "eyemech"
     help
-        Offered to the router's DHCP server, which on many home routers makes
-        the device resolvable by name. This is not mDNS: real .local resolution
-        would need the espressif/mdns component.
+        Used for both the DHCP hostname and the mDNS name, so the board answers
+        to <hostname>.local on the station network and on the recovery access
+        point. tools/eyectl.py defaults to matching this.
 
 endmenu

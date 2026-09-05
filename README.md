@@ -68,9 +68,10 @@ parked on the access point, so a network that drops out is picked back up
 unattended. Only a profile that actually obtained an IP becomes the boot
 default, so a typo does not survive a power cycle.
 
-`eyectl` defaults to the host `eyemech`, which works where the router registers
-DHCP hostnames. There is no mDNS responder, so `eyemech.local` is not
-guaranteed; `--host 192.168.4.1` always works on the recovery AP.
+mDNS advertises `eyemech.local` on both interfaces, so the board answers to
+that name whether it joined your network or you joined its access point — which
+is what `eyectl` defaults to. `--host 192.168.4.1` is the fallback if mDNS is
+blocked, as it is on some corporate networks.
 
 ## Modes
 

@@ -29,6 +29,9 @@
  *
  * Credentials live in NVS (namespace "eyenet"), seeded once from Kconfig if
  * NVS is empty. Nothing is compiled in, and nothing is logged.
+ *
+ * mDNS advertises <hostname>.local on both interfaces, so the board is
+ * reachable by name whether it joined a network or you joined its AP.
  */
 #include <stdbool.h>
 #include <stddef.h>

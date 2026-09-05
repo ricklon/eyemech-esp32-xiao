@@ -6,6 +6,7 @@
 #include "esp_log.h"
 #include "esp_netif.h"
 #include "esp_wifi.h"
+#include "mdns.h"
 #include "freertos/FreeRTOS.h"
 #include "freertos/queue.h"
 #include "freertos/semphr.h"
@@ -254,6 +255,24 @@ static void run_scan(void)
     ESP_LOGI(TAG, "scan found %d networks", s_scan_count);
 }
 
+/* Advertise on both interfaces, so eyemech.local resolves whether the board is
+ * on a station network or you have joined the recovery AP. Never fatal: mDNS
+ * failing costs a convenience, and the numeric address still works. */
+static void mdns_start(void)
+{
+    esp_err_t err = mdns_init();
+    if (err != ESP_OK) {
+        ESP_LOGW(TAG, "mDNS unavailable: %s — use the IP address",
+                 esp_err_to_name(err));
+        return;
+    }
+    mdns_hostname_set(CONFIG_EYE_NET_HOSTNAME);
+    mdns_instance_name_set("eyemech eye mechanism");
+    /* Lets the control page be found by service browsing as well as by name. */
+    mdns_service_add(NULL, "_http", "_tcp", 80, NULL, 0);
+    ESP_LOGI(TAG, "mDNS up — http://%s.local/", CONFIG_EYE_NET_HOSTNAME);
+}
+
 /* ---------------------------------------------------------------- events */
 
 static void queue_cmd(const cmd_t *c) { (void)xQueueSend(s_q, c, 0); }
@@ -387,6 +406,7 @@ esp_err_t eye_net_start(void)
     }
 
     ESP_RETURN_ON_ERROR(esp_wifi_start(), TAG, "wifi start");
+    mdns_start();
     ESP_LOGI(TAG, "APSTA up: AP '%s' at %s, %d station profile(s)",
              CONFIG_EYE_NET_AP_SSID, AP_IP_ADDR, configured_count());
 

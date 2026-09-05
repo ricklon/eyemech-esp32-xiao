@@ -55,10 +55,9 @@ def print_state(s):
 def main():
     p = argparse.ArgumentParser(description=__doc__,
                                 formatter_class=argparse.RawDescriptionHelpFormatter)
-    # No default hostname: the firmware sets a DHCP hostname, which many
-    # routers register, but it runs no mDNS responder, so "eyemech.local" is
-    # not guaranteed to resolve. 192.168.4.1 always works on the recovery AP.
-    p.add_argument("--host", default="eyemech",
+    # The firmware advertises this over mDNS on both the station network and
+    # the recovery AP. 192.168.4.1 still works if mDNS is blocked.
+    p.add_argument("--host", default="eyemech.local",
                    help="IP or hostname; 192.168.4.1 on the recovery AP")
     sub = p.add_subparsers(dest="cmd", required=True)
 
