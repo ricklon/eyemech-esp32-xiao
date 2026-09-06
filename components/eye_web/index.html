@@ -31,6 +31,14 @@
   td input { width:4.2rem; font:inherit; padding:.1rem .25rem; background:transparent;
              color:inherit; border:1px solid var(--line); border-radius:3px; }
   .warn { color:var(--accent); font-size:.8rem; }
+  /* Six animations have to stay readable on a phone at the bench, so let them
+     wrap into as many columns as fit rather than one long row. */
+  #anims { display:grid; grid-template-columns:repeat(auto-fill,minmax(9.5rem,1fr)); gap:.4rem; }
+  #anims button { display:flex; flex-direction:column; align-items:flex-start;
+                  gap:.15rem; text-align:left; }
+  #anims .d { color:var(--dim); font-size:.72rem; font-weight:400; }
+  .check { display:inline-flex; align-items:center; gap:.35rem; margin:0; }
+  .check span { min-width:0; }
 </style>
 </head>
 <body>
@@ -45,6 +53,15 @@
     <button data-mode="auto">Auto</button>
     <button data-mode="manual">Manual</button>
     <button data-mode="calibration">Calibration</button>
+  </div>
+</fieldset>
+
+<fieldset>
+  <legend>Animations — returns to the previous mode when finished</legend>
+  <div id="anims"></div>
+  <div class="row">
+    <label class="check"><input type="checkbox" id="animloop"><span>Loop until stopped</span></label>
+    <button id="animstop" hidden>Stop after this cycle</button>
   </div>
 </fieldset>
 
@@ -133,6 +150,23 @@ document.getElementById('save').onclick    = () => post('/api/save').then(refres
 document.getElementById('center').onclick  = () => { lr = ud = 90; drawPad(); post('/api/look', { lr, ud }); };
 document.getElementById('trim').oninput    = e => post('/api/lid_trim', { value: +e.target.value });
 
+/* --- animations -------------------------------------------------------- */
+const animBox = document.getElementById('anims');
+document.getElementById('animstop').onclick = () => post('/api/anim/stop').then(refresh);
+
+function renderAnims() {
+  /* The list is compiled in, so build the buttons once and then only restyle
+     them — rebuilding every second would fight the pointer. */
+  if (animBox.childElementCount === state.anims.length) return;
+  animBox.innerHTML = state.anims.map(a =>
+    `<button data-anim="${a.name}"><span>${a.name.replace(/_/g, ' ')}</span>` +
+    `<span class="d">${a.desc}</span></button>`).join('');
+  animBox.querySelectorAll('button').forEach(b => b.onclick = () =>
+    post('/api/anim', { name: b.dataset.anim,
+                        repeat: document.getElementById('animloop').checked ? -1 : 1 })
+      .then(refresh));
+}
+
 /* --- servo table ------------------------------------------------------- */
 function rowHtml(s) {
   const a = Number.isFinite(s.angle) ? s.angle.toFixed(1) : '—';
@@ -165,6 +199,10 @@ async function refresh() {
     document.querySelectorAll('#modes button').forEach(b =>
       b.setAttribute('aria-pressed', b.dataset.mode === state.mode));
     document.getElementById('calnote').hidden = state.mode !== 'calibration';
+    renderAnims();
+    animBox.querySelectorAll('button').forEach(b =>
+      b.setAttribute('aria-pressed', b.dataset.anim === state.anim));
+    document.getElementById('animstop').hidden = !state.anim;
     // A latched release is only escapable from here, so the button has to swap.
     document.getElementById('relnote').hidden  = !state.released;
     document.getElementById('engage').hidden   = !state.released;

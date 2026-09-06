@@ -83,10 +83,18 @@ static esp_err_t state_get(httpd_req_t *req)
     cJSON_AddBoolToObject(root, "vision", eye_vision_present());
     cJSON_AddBoolToObject(root, "released", eye_servo_is_released());
 
+    /* Objects rather than bare names: the page has nothing to label a button
+     * with otherwise, and the descriptions already exist in the table. */
     cJSON *anims = cJSON_AddArrayToObject(root, "anims");
     for (const char *const *a = eye_motion_anim_names(); *a; a++) {
-        cJSON_AddItemToArray(anims, cJSON_CreateString(*a));
+        cJSON *o = cJSON_CreateObject();
+        cJSON_AddStringToObject(o, "name", *a);
+        cJSON_AddStringToObject(o, "desc", eye_motion_anim_desc(*a));
+        cJSON_AddItemToArray(anims, o);
     }
+    /* Empty rather than null, so the page can just test truthiness. */
+    const char *playing = eye_motion_anim_playing();
+    cJSON_AddStringToObject(root, "anim", playing ? playing : "");
 
     char buf[33];
     eye_net_ssid(buf, sizeof(buf));
@@ -172,6 +180,14 @@ static esp_err_t anim_post(httpd_req_t *req)
     if (err != ESP_OK) {
         return httpd_resp_send_err(req, HTTPD_400_BAD_REQUEST, "unknown animation");
     }
+    return send_ok(req);
+}
+
+/* Ending a loop. Idempotent on purpose: a page that has just missed the end of
+ * a sequence should not get an error for tidying up after it. */
+static esp_err_t anim_stop_post(httpd_req_t *req)
+{
+    (void)eye_motion_anim_stop();
     return send_ok(req);
 }
 
@@ -273,6 +289,7 @@ static const httpd_uri_t s_routes[] = {
     { .uri = "/api/lid_trim", .method = HTTP_POST, .handler = lid_trim_post },
     { .uri = "/api/blink",    .method = HTTP_POST, .handler = blink_post },
     { .uri = "/api/anim",     .method = HTTP_POST, .handler = anim_post },
+    { .uri = "/api/anim/stop",.method = HTTP_POST, .handler = anim_stop_post },
     { .uri = "/api/servo",    .method = HTTP_POST, .handler = servo_post },
     { .uri = "/api/limits",   .method = HTTP_POST, .handler = limits_post },
     { .uri = "/api/cfg",      .method = HTTP_POST, .handler = cfg_post },

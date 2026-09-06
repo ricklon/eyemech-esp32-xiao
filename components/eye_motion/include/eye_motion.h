@@ -84,6 +84,9 @@ const char        *eye_motion_anim_desc(const char *name);
 
 /* True while a sequence is running. */
 bool eye_motion_anim_busy(void);
+/* Name of the animation playing right now, or NULL when nothing is. Static
+ * storage from the table, so it stays valid after the sequence ends. */
+const char *eye_motion_anim_playing(void);
 
 esp_err_t eye_motion_start(void);
 

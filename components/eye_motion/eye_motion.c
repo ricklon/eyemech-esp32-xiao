@@ -561,6 +561,12 @@ const char *eye_motion_anim_desc(const char *name)
 
 bool eye_motion_anim_busy(void) { return s_mode == EYE_MODE_ANIM && s_anim != NULL; }
 
+const char *eye_motion_anim_playing(void)
+{
+    const eye_anim_t *a = s_anim;   /* one read: the motion task clears it */
+    return (s_mode == EYE_MODE_ANIM && a != NULL) ? a->name : NULL;
+}
+
 /* End a loop. Finishes the frame in flight rather than stopping mid-move, so
  * the mechanism settles somewhere deliberate instead of wherever it happened to
  * be when the command arrived. */
