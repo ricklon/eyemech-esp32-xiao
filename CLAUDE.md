@@ -90,11 +90,15 @@ tools/eyectl.py           drive the HTTP API from a shell
 
 ## Things that will bite you
 
-**`servo_limits` entries can run backwards.** `BL` and `TR` are `(90, 10)` —
-max is numerically smaller than min, because those two lid servos are mounted
-mirrored relative to their partners. Any code that clamps against these must
-handle either ordering; `eye_motion.c` does it with `fminf`/`fmaxf`. Never
-"fix" the table by swapping the values.
+**`servo_limits` entries can run backwards**, and *which* entries changes.
+In the compiled defaults it is `BL` and `TR` at `(90, 10)` — max numerically
+smaller than min. On the rebuilt mechanism it is the other pair: the measured
+limits in NVS have `TL` at `(90, 13)` and `BR` at `(90, 15)` running backwards
+while `BL` and `TR` run forwards (`af314e3`: TL and BR open downward). Which
+pair is inverted depends on how the horns went back on, so never assume it from
+either table. Any code that clamps against these must handle either ordering;
+`eye_motion.c` does it with `fminf`/`fmaxf`. Never "fix" a table by swapping
+the values — that just moves the inversion somewhere less obvious.
 
 **`/OE` has a 10k pull-DOWN to GND on this build, not a pull-up.** Outputs are
 therefore enabled by default, through the whole boot window. On a cold start the
