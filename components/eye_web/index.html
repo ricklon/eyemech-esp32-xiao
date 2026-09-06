@@ -42,6 +42,7 @@
   select { font:inherit; padding:.25rem .4rem; background:transparent; color:inherit;
            border:1px solid var(--line); border-radius:5px; }
   #jognow { color:var(--dim); font-size:.8rem; align-self:center; }
+  .num { min-width:2.5rem; text-align:right; font-variant-numeric:tabular-nums; }
 </style>
 </head>
 <body>
@@ -81,8 +82,14 @@
 </fieldset>
 
 <fieldset>
-  <legend>Lid trim — how wide the eyes open</legend>
-  <label><span>Openness</span><input type="range" id="trim" min="0" max="1" step="0.01" value="0.5"></label>
+  <legend>Lids</legend>
+  <label><span>Openness</span><input type="range" id="trim" min="0" max="1" step="0.01" value="0.5"><span class="num" id="trimval"></span></label>
+  <p class="warn">The two below are the character of the face, not a tweak: how hard
+  each lid pair follows vertical gaze. 0.80 upper and 0.40 lower is the reference.
+  Record a change you decide to keep in <code>docs/decisions.md</code>.</p>
+  <label><span>Upper track</span><input type="range" id="cu" min="0" max="1" step="0.05"><span class="num" id="cuval"></span></label>
+  <label><span>Lower track</span><input type="range" id="cl" min="0" max="1" step="0.05"><span class="num" id="clval"></span></label>
+  <div class="row"><button id="coeffref">Back to 0.80 / 0.40</button></div>
 </fieldset>
 
 <fieldset id="jogbox" hidden>
@@ -176,7 +183,34 @@ document.getElementById('release').onclick = () => post('/api/release');
 document.getElementById('engage').onclick  = () => post('/api/engage');
 document.getElementById('save').onclick    = () => post('/api/save').then(refresh);
 document.getElementById('center').onclick  = () => { lr = ud = 90; drawPad(); post('/api/look', { lr, ud }); };
-document.getElementById('trim').oninput    = e => post('/api/lid_trim', { value: +e.target.value });
+
+/* --- lids -------------------------------------------------------------- */
+/* The board is the source of truth for these — the trim comes back from NVS at
+   0.85, not the 0.5 the markup starts at — but do not yank a slider out from
+   under the finger that is dragging it. */
+function syncSlider(id, v) {
+  const el = document.getElementById(id);
+  if (document.activeElement !== el && Number.isFinite(v)) el.value = v;
+  document.getElementById(id + 'val').textContent = (+el.value).toFixed(2);
+}
+
+const postCoeff = () => post('/api/lid_coeff', {
+  upper: +document.getElementById('cu').value,
+  lower: +document.getElementById('cl').value });
+
+document.getElementById('trim').oninput = e => {
+  document.getElementById('trimval').textContent = (+e.target.value).toFixed(2);
+  post('/api/lid_trim', { value: +e.target.value });
+};
+['cu', 'cl'].forEach(id => document.getElementById(id).oninput = e => {
+  document.getElementById(id + 'val').textContent = (+e.target.value).toFixed(2);
+  postCoeff();
+});
+document.getElementById('coeffref').onclick = () => {
+  document.getElementById('cu').value = 0.8;
+  document.getElementById('cl').value = 0.4;
+  postCoeff().then(refresh);
+};
 
 /* --- animations -------------------------------------------------------- */
 const animBox = document.getElementById('anims');
@@ -260,6 +294,9 @@ async function refresh() {
     document.getElementById('calnote').hidden = state.mode !== 'calibration';
     jogBox.hidden = state.mode !== 'calibration';   /* the API refuses anyway */
     fillJogServos();
+    syncSlider('trim', state.lid_trim);
+    syncSlider('cu', state.coeff_upper);
+    syncSlider('cl', state.coeff_lower);
     renderAnims();
     animBox.querySelectorAll('button').forEach(b =>
       b.setAttribute('aria-pressed', b.dataset.anim === state.anim));

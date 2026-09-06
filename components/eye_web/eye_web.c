@@ -116,6 +116,8 @@ static esp_err_t state_get(httpd_req_t *req)
         eye_net_state() == EYE_NET_STA_CONNECTED ? "station" :
         eye_net_state() == EYE_NET_AP_ONLY       ? "ap" : "connecting");
     cJSON_AddNumberToObject(root, "lid_trim", eye_motion_get_lid_trim());
+    cJSON_AddNumberToObject(root, "coeff_upper", eye_motion_get_coeff_upper());
+    cJSON_AddNumberToObject(root, "coeff_lower", eye_motion_get_coeff_lower());
     cJSON_AddNumberToObject(root, "lr", eye_motion_target_lr());
     cJSON_AddNumberToObject(root, "ud", eye_motion_target_ud());
 
@@ -175,6 +177,25 @@ static esp_err_t lid_trim_post(httpd_req_t *req)
     eye_motion_set_lid_trim(jnum(body, "value", 0.5f));
     cJSON_Delete(body);
     return send_ok(req);
+}
+
+/* How hard each lid pair tracks vertical gaze. CLAUDE.md calls these the
+ * character of the face and asks for changes to be recorded in
+ * docs/decisions.md — hence the note on the page rather than a bare slider.
+ * Omitted fields keep their current value, so one slider can move alone. */
+static esp_err_t lid_coeff_post(httpd_req_t *req)
+{
+    cJSON *body = NULL;
+    if (read_json(req, &body) != ESP_OK) {
+        return httpd_resp_send_err(req, HTTPD_400_BAD_REQUEST, "bad json");
+    }
+    float upper = jnum(body, "upper", eye_motion_get_coeff_upper());
+    float lower = jnum(body, "lower", eye_motion_get_coeff_lower());
+    cJSON_Delete(body);
+    if (eye_motion_set_lid_coeff(upper, lower) != ESP_OK) {
+        return httpd_resp_send_err(req, HTTPD_400_BAD_REQUEST, "bad coefficient");
+    }
+    return send_ok(req);   /* not persisted — /api/save keeps it */
 }
 
 static esp_err_t anim_post(httpd_req_t *req)
@@ -358,6 +379,7 @@ static const httpd_uri_t s_routes[] = {
     { .uri = "/api/mode",     .method = HTTP_POST, .handler = mode_post },
     { .uri = "/api/look",     .method = HTTP_POST, .handler = look_post },
     { .uri = "/api/lid_trim", .method = HTTP_POST, .handler = lid_trim_post },
+    { .uri = "/api/lid_coeff",.method = HTTP_POST, .handler = lid_coeff_post },
     { .uri = "/api/blink",    .method = HTTP_POST, .handler = blink_post },
     { .uri = "/api/anim",     .method = HTTP_POST, .handler = anim_post },
     { .uri = "/api/anim/stop",.method = HTTP_POST, .handler = anim_stop_post },
