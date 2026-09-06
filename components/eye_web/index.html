@@ -30,6 +30,10 @@
   th { font-weight:500; color:var(--dim); font-size:.75rem; }
   td input { width:4.2rem; font:inherit; padding:.1rem .25rem; background:transparent;
              color:inherit; border:1px solid var(--line); border-radius:3px; }
+  td input.us { width:3.4rem; }
+  /* Eight columns do not fit a phone; scroll the table rather than the page. */
+  .scroll { overflow-x:auto; }
+  .scroll table { min-width:34rem; }
   .warn { color:var(--accent); font-size:.8rem; }
   /* Six animations have to stay readable on a phone at the bench, so let them
      wrap into as many columns as fit rather than one long row. */
@@ -120,10 +124,17 @@
 <fieldset>
   <legend>Servos</legend>
   <p class="warn" id="calnote" hidden>Calibration mode: angle fields write directly to the servo. Small steps.</p>
-  <table>
-    <thead><tr><th>Ch</th><th>Servo</th><th>Angle</th><th>Min</th><th>Max</th><th>Trim µs</th></tr></thead>
-    <tbody id="servos"></tbody>
-  </table>
+  <p class="warn">Min µs and Max µs are the pulse range the servo is driven with, not
+  a limit — changing them changes what every angle means, including the ones already
+  measured. A servo that only honours 1000–2000 µs under-travels silently, which shows
+  up as lids that never fully close.</p>
+  <div class="scroll">
+    <table>
+      <thead><tr><th>Ch</th><th>Servo</th><th>Angle</th><th>Min</th><th>Max</th>
+                 <th>Min µs</th><th>Max µs</th><th>Trim µs</th></tr></thead>
+      <tbody id="servos"></tbody>
+    </table>
+  </div>
   <div class="row"><button id="save">Save to NVS</button></div>
 </fieldset>
 
@@ -268,7 +279,9 @@ function rowHtml(s) {
     <td><input data-f="angle" value="${a}"></td>
     <td><input data-f="min" value="${s.min}"></td>
     <td><input data-f="max" value="${s.max}"></td>
-    <td><input data-f="trim_us" value="${s.trim_us}"></td></tr>`;
+    <td><input class="us" data-f="min_us" value="${s.min_us}"></td>
+    <td><input class="us" data-f="max_us" value="${s.max_us}"></td>
+    <td><input class="us" data-f="trim_us" value="${s.trim_us}"></td></tr>`;
 }
 
 document.getElementById('servos').addEventListener('focusin', () => dirty = true);
@@ -276,10 +289,14 @@ document.getElementById('servos').addEventListener('change', ev => {
   const tr = ev.target.closest('tr'), servo = tr.dataset.servo;
   const f = ev.target.dataset.f, v = parseFloat(ev.target.value);
   if (!Number.isFinite(v)) return;
-  if (f === 'angle')        post('/api/servo',  { servo, angle: v });
-  else if (f === 'trim_us') post('/api/cfg',    { servo, trim_us: v });
-  else                      post('/api/limits', { servo, [f]: v });
+  const p = f === 'angle'     ? post('/api/servo',  { servo, angle: v })
+          : f.endsWith('_us') ? post('/api/cfg',    { servo, [f]: v })
+          :                     post('/api/limits', { servo, [f]: v });
   dirty = false;
+  /* eye_servo_set_cfg() rejects a pulse range outside 300..3000 or inverted,
+     and the field would otherwise sit there showing a value the board never
+     took. Pull the real one back. */
+  p.then(r => { if (!r.ok) refresh(); });
 });
 
 async function refresh() {
