@@ -104,6 +104,14 @@ seeding positions makes the servos sag and then snap back.
 identical lid targets constantly and I²C is the bottleneck; the skip is worth
 roughly an order of magnitude in loop rate. Don't remove it.
 
+**On USB-Serial-JTAG, `fflush()` is not enough to get a character out.** The
+console runs on that peripheral with no VFS driver installed, and in that mode
+IDF only raises the TX FIFO's flush bit on a `'\n'`. `fflush()` moves the byte
+into the FIFO and leaves it there, so anything printed mid-line — a keystroke
+echo, a progress dot — is invisible until a newline flushes the whole line at
+once. `fsync(fileno(stdout))` is what actually flushes; `eye_console` wraps the
+pair as `push_stdout()`.
+
 **Timing is wall-clock, not loop counts.** The original's
 `random.randrange(20000)` blink interval was tied to the Pico's loop rate and
 did not survive the port to a different core. Use `esp_timer_get_time()`.

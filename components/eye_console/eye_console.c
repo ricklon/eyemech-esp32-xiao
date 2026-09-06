@@ -8,6 +8,7 @@
 #include <stdio.h>
 #include <stdlib.h>
 #include <string.h>
+#include <unistd.h>
 #include "esp_log.h"
 #include "esp_system.h"
 #include "freertos/FreeRTOS.h"
@@ -36,6 +37,21 @@ static int servo_arg(const char *name)
     int id = eye_servo_from_name(name ? name : "");
     if (id < 0) printf("unknown servo '%s' (LR UD TL BL TR BR)\r\n", name ? name : "");
     return id;
+}
+
+/* Push stdout all the way to the host, mid-line.
+ *
+ * The console is on USB-Serial-JTAG with no VFS driver installed (the reason
+ * is in sdkconfig.defaults). In that mode usb_serial_jtag_tx_char_no_driver()
+ * only raises the TX FIFO's flush bit on a '\n', so fflush() moves an echoed
+ * keystroke into the FIFO and leaves it there: you type blind until Enter
+ * flushes the whole line at once. fsync() is what actually flushes, and it
+ * returns immediately when no host is attached, so it costs nothing when
+ * nobody is watching. */
+static void push_stdout(void)
+{
+    fflush(stdout);
+    (void)fsync(fileno(stdout));
 }
 
 /* strtok_r over a mutable line; returns NULL when exhausted. */
@@ -414,11 +430,11 @@ static void console_task(void *arg)
             }
             fflush(stdout);
         } else if (c == '\b' || c == 0x7f) {
-            if (len > 0) { len--; fputs("\b \b", stdout); fflush(stdout); }
+            if (len > 0) { len--; fputs("\b \b", stdout); push_stdout(); }
         } else if (c >= 0x20 && c < 0x7f && len < sizeof(buf) - 1) {
             buf[len++] = (char)c;
             fputc(c, stdout);
-            fflush(stdout);
+            push_stdout();
         }
     }
 }
