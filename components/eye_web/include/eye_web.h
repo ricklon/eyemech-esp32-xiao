@@ -13,7 +13,7 @@
  *   POST /api/look        {"lr":deg,"ud":deg}          switches to manual
  *   POST /api/lid_trim    {"value":0..1}               was the trim pot
  *   POST /api/blink       —                            was the blink button
- *   POST /api/anim        {"name":"look"|"roll"}       play an animation
+ *   POST /api/anim        {"name":"look"|"roll","repeat":1}  -1 loops
  *   POST /api/servo       {"servo":"TL","angle":120}   calibration mode only
  *   POST /api/limits      {"servo":"TL","min":90,"max":170}
  *   POST /api/cfg         {"servo":"TL","min_us":500,"max_us":2500,"trim_us":0}

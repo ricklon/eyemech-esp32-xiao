@@ -165,7 +165,8 @@ static esp_err_t anim_post(httpd_req_t *req)
         return httpd_resp_send_err(req, HTTPD_400_BAD_REQUEST, "bad json");
     }
     const cJSON *n = cJSON_GetObjectItemCaseSensitive(body, "name");
-    esp_err_t err = cJSON_IsString(n) ? eye_motion_play(n->valuestring)
+    int repeat = (int)jnum(body, "repeat", 1);   /* negative loops */
+    esp_err_t err = cJSON_IsString(n) ? eye_motion_play(n->valuestring, repeat)
                                       : ESP_ERR_INVALID_ARG;
     cJSON_Delete(body);
     if (err != ESP_OK) {
@@ -242,7 +243,9 @@ static esp_err_t cfg_post(httpd_req_t *req)
 
 static esp_err_t save_post(httpd_req_t *req)
 {
-    if (eye_motion_save_lid_trim() != ESP_OK || eye_servo_save() != ESP_OK) {
+    if (eye_motion_save_lid_trim() != ESP_OK ||
+        eye_motion_save_lid_coeff() != ESP_OK ||
+        eye_servo_save() != ESP_OK) {
         return httpd_resp_send_err(req, HTTPD_500_INTERNAL_SERVER_ERROR, "nvs write failed");
     }
     return send_ok(req);

@@ -68,8 +68,10 @@ static void cmd_help(void)
     "  !mode <name>               tracking | auto | manual | calibration\r\n"
     "  !blink                     queue one blink\r\n"
     "  !trim <0..1>               lid openness\r\n"
+    "  !lids <upper> <lower>      how hard lids track gaze (ref 0.8 0.4)\r\n"
     "  !look <lr> <ud>            manual gaze, degrees\r\n"
-    "  !anim <name>               play an animation (!anim list)\r\n"
+    "  !anim <name> [n|loop]      play an animation, n times or forever\r\n"
+    "  !anim stop                 end a loop after the current cycle\r\n"
     "networking:\r\n"
     "  !wifi                      link, SSID, IP, access point\r\n"
     "  !wifi list                 saved profiles\r\n"
@@ -98,6 +100,8 @@ static void cmd_status(void)
     printf("vision    : %s\r\n", eye_vision_present() ? "detected" : "absent");
     printf("lid trim  : %.2f\r\n", (double)eye_motion_get_lid_trim());
     printf("safe boot : %s\r\n", eye_servo_safe_boot() ? "ON (boots released)" : "OFF");
+    printf("lid track : upper %.2f  lower %.2f\r\n",
+           (double)eye_motion_get_coeff_upper(), (double)eye_motion_get_coeff_lower());
     printf("free heap : %u bytes\r\n", (unsigned)esp_get_free_heap_size());
     printf("%-5s %-3s %9s %8s %8s %8s %8s %8s\r\n",
            "name", "ch", "angle", "min", "max", "min_us", "max_us", "trim_us");
@@ -303,6 +307,17 @@ static void handle(char *line)
     else if (!strcmp(cmd, "blink"))    report("blink",   eye_motion_request_blink());
     else if (!strcmp(cmd, "mode"))     cmd_mode(&save);
     else if (!strcmp(cmd, "wifi"))     cmd_wifi(&save);
+    else if (!strcmp(cmd, "lids")) {
+        const char *u = next_tok(&save), *l = next_tok(&save);
+        if (u && l) {
+            report("lids", eye_motion_set_lid_coeff(strtof(u, NULL), strtof(l, NULL)));
+        } else if (u) {
+            printf("usage: !lids <upper> <lower>   (reference 0.8 0.4)\r\n");
+        }
+        printf("lid tracking: upper %.2f  lower %.2f\r\n",
+               (double)eye_motion_get_coeff_upper(),
+               (double)eye_motion_get_coeff_lower());
+    }
     else if (!strcmp(cmd, "anim")) {
         const char *name = next_tok(&save);
         const char *const *all = eye_motion_anim_names();
@@ -313,7 +328,17 @@ static void handle(char *line)
             }
             return;
         }
-        esp_err_t err = eye_motion_play(name);
+        if (!strcmp(name, "stop")) {
+            esp_err_t serr = eye_motion_anim_stop();
+            printf(serr == ESP_OK ? "stopping after this cycle\r\n"
+                                  : "nothing playing\r\n");
+            return;
+        }
+        const char *rep = next_tok(&save);
+        int n = 1;
+        if (rep != NULL) n = (!strcmp(rep, "loop")) ? -1 : atoi(rep);
+        if (n == 0) n = 1;
+        esp_err_t err = eye_motion_play(name, n);
         if (err == ESP_ERR_NOT_FOUND) printf("no animation '%s' — try !anim list\r\n", name);
         else                          report("anim", err);
     }
@@ -325,6 +350,7 @@ static void handle(char *line)
     else if (!strcmp(cmd, "save")) {
         esp_err_t err = eye_servo_save();
         if (err == ESP_OK) err = eye_motion_save_lid_trim();
+        if (err == ESP_OK) err = eye_motion_save_lid_coeff();
         report("save", err);
     }
     else if (!strcmp(cmd, "safeboot")) {

@@ -51,21 +51,32 @@ typedef enum {
  * `min` end of an axis and 1 the `max` end — for a lid that means 0 closed and
  * 1 open, whichever numeric direction that happens to be on this build.
  *
- * NAN means "leave this alone": for lr/ud, hold the current target; for lid,
- * let the usual UD coupling in control_ud_and_lids() drive the lids instead of
- * commanding them, so a gaze move still gets its natural lid tracking.
+ * NAN means "I am not driving this". For lr/ud that holds the current target;
+ * for a lid pair it hands that side back to the UD coupling in
+ * control_ud_and_lids(), so a gaze move still gets natural lid tracking.
+ *
+ * To HOLD a lid at an explicit value across frames, repeat the value rather than
+ * using NAN — NAN would return it to the coupling. Holds are what make these
+ * read as emotes rather than motion: the pause sells the expression.
+ *
+ * The two lid fields are separate because gaze is shared between the eyes but
+ * the lids are not, which is what makes a wink possible.
  */
 typedef struct {
-    float    lr;    /* 0..1 across the LR limits, NAN to hold          */
-    float    ud;    /* 0..1 across the UD limits, NAN to hold          */
-    float    lid;   /* 0 closed .. 1 open, NAN to follow the UD coupling */
-    uint16_t ms;    /* time to travel from the previous frame to this  */
+    float    lr;      /* 0..1 across the LR limits, NAN to hold          */
+    float    ud;      /* 0..1 across the UD limits, NAN to hold          */
+    float    lid_l;   /* LEFT eye (TL,BL): 0 closed .. 1 open            */
+    float    lid_r;   /* RIGHT eye (TR,BR)                               */
+    uint16_t ms;      /* time to travel from the previous frame to this  */
 } eye_frame_t;
 
-/* Play a named animation. Interrupts whatever is running, then restores the
- * previous mode when the sequence finishes. Unknown name returns
- * ESP_ERR_NOT_FOUND. */
-esp_err_t eye_motion_play(const char *name);
+/* Play a named animation `repeat` times, restoring the previous mode when it
+ * finishes. A negative `repeat` loops until eye_motion_anim_stop(). Unknown name
+ * returns ESP_ERR_NOT_FOUND. */
+esp_err_t eye_motion_play(const char *name, int repeat);
+
+/* End a loop after the frame in flight, so it settles somewhere deliberate. */
+esp_err_t eye_motion_anim_stop(void);
 
 /* NULL-terminated list of built-in animation names, for help text and the UI. */
 const char *const *eye_motion_anim_names(void);
@@ -123,6 +134,14 @@ float     eye_motion_get_lid_trim(void);
  * blob — that struct's size is length-checked on load, so growing it would
  * invalidate every stored limit. */
 esp_err_t eye_motion_save_lid_trim(void);
+
+/* How strongly the lid pairs track vertical gaze — reference 0.8 upper, 0.4
+ * lower. The asymmetry is most of what makes the face read as alive, so treat
+ * changes as a decision worth recording, not a tweak. */
+float     eye_motion_get_coeff_upper(void);
+float     eye_motion_get_coeff_lower(void);
+esp_err_t eye_motion_set_lid_coeff(float upper, float lower);
+esp_err_t eye_motion_save_lid_coeff(void);
 
 /* Queue one blink; the state machine picks it up on the next tick. */
 esp_err_t eye_motion_request_blink(void);
