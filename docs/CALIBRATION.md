@@ -117,6 +117,16 @@ That single step is the difference.
 
 Stored in NVS, namespace `eyemech`, key `servo_cal_v1`.
 
+**Lid trim: 0.85**, stored separately under key `lid_trim` in the same namespace.
+It sets where "open" sits within the measured travel. At the old default of 0.50
+open was only 75% of full travel, and `control_ud_and_lids()` then hoods the
+upper lids a further 40% at level gaze — leaving them around 45% open, which
+reads as sleepy. 0.85 puts them near 56%.
+
+It is deliberately *not* inside the calibration blob: `eye_servo_load()`
+length-checks that struct, so adding a field would invalidate every stored limit
+on the next boot.
+
 All six axes are measured. Nothing in the table is assumed.
 
 **Hunt the closed end even when it lands on 90.** On the rebuild it did, three

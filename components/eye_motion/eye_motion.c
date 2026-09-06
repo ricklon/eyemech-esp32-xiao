@@ -7,6 +7,7 @@
 #include "esp_log.h"
 #include "esp_random.h"
 #include "esp_timer.h"
+#include "nvs.h"
 #include "freertos/FreeRTOS.h"
 #include "freertos/task.h"
 
@@ -17,7 +18,15 @@ static float s_tl_target = 90.0f, s_tr_target = 90.0f;
 static float s_bl_target = 90.0f, s_br_target = 90.0f;
 
 static float s_x_target = 90.0f, s_y_target = 90.0f;
-static float s_lid_trim = 0.5f;
+/* Chosen on hardware 2026-09-05: at level gaze the 0.8 coefficient hoods the
+ * upper lids 40% from open, so a trim of 0.5 leaves them only ~45% open, which
+ * reads as sleepy. 0.85 puts them near 56%. Persisted, so this is only the
+ * value a board with empty NVS starts from. */
+#define LID_TRIM_DEFAULT 0.85f
+#define NVS_NAMESPACE    "eyemech"
+#define NVS_KEY_TRIM     "lid_trim"
+
+static float s_lid_trim = LID_TRIM_DEFAULT;
 
 static eye_mode_t s_mode = EYE_MODE_AUTO;
 static bool       s_blink_requested;
@@ -249,6 +258,36 @@ esp_err_t eye_motion_set_lid_trim(float progress)
 
 float eye_motion_get_lid_trim(void) { return s_lid_trim; }
 
+/* Stored under its own key rather than inside eye_servo's calibration blob:
+ * adding a field to that struct changes its size, and eye_servo_load() rejects
+ * a blob whose length does not match, which would silently reset every measured
+ * limit. */
+esp_err_t eye_motion_save_lid_trim(void)
+{
+    nvs_handle_t h;
+    esp_err_t err = nvs_open(NVS_NAMESPACE, NVS_READWRITE, &h);
+    if (err != ESP_OK) return err;
+    err = nvs_set_blob(h, NVS_KEY_TRIM, &s_lid_trim, sizeof(s_lid_trim));
+    if (err == ESP_OK) err = nvs_commit(h);
+    nvs_close(h);
+    ESP_LOGI(TAG, "lid trim %.2f saved: %s", (double)s_lid_trim, esp_err_to_name(err));
+    return err;
+}
+
+static void load_lid_trim(void)
+{
+    nvs_handle_t h;
+    if (nvs_open(NVS_NAMESPACE, NVS_READONLY, &h) != ESP_OK) return;
+    float v = LID_TRIM_DEFAULT;
+    size_t len = sizeof(v);
+    if (nvs_get_blob(h, NVS_KEY_TRIM, &v, &len) == ESP_OK &&
+        len == sizeof(v) && isfinite(v) && v >= 0.0f && v <= 1.0f) {
+        s_lid_trim = v;
+        ESP_LOGI(TAG, "lid trim %.2f from NVS", (double)v);
+    }
+    nvs_close(h);
+}
+
 esp_err_t eye_motion_look(float lr_angle, float ud_angle)
 {
     s_x_target = clamp_to_limits(EYE_LR, lr_angle);
@@ -296,17 +335,17 @@ static const eye_frame_t s_frames_look[] = {
  * widen over the top, which is most of what makes it read as a roll rather
  * than a mechanical sweep. */
 static const eye_frame_t s_frames_roll[] = {
-    { 0.50f, 0.50f, 1.00f, 350 },   /* open, centred */
-    { 0.50f, 0.92f, NAN,   350 },   /* up            */
-    { 0.80f, 0.80f, NAN,   200 },
-    { 0.92f, 0.50f, NAN,   200 },   /* right         */
-    { 0.80f, 0.20f, NAN,   200 },
-    { 0.50f, 0.08f, NAN,   200 },   /* down          */
-    { 0.20f, 0.20f, NAN,   200 },
-    { 0.08f, 0.50f, NAN,   200 },   /* left          */
-    { 0.20f, 0.80f, NAN,   200 },
-    { 0.50f, 0.92f, NAN,   200 },   /* back to the top */
-    { 0.50f, 0.50f, NAN,   400 },   /* settle centred  */
+    { 0.50f, 0.50f, 1.00f, 500 },   /* open, centred   */
+    { 0.50f, 0.92f, NAN,   500 },   /* up              */
+    { 0.80f, 0.80f, NAN,   350 },
+    { 0.92f, 0.50f, NAN,   350 },   /* right           */
+    { 0.80f, 0.20f, NAN,   350 },
+    { 0.50f, 0.08f, NAN,   350 },   /* down            */
+    { 0.20f, 0.20f, NAN,   350 },
+    { 0.08f, 0.50f, NAN,   350 },   /* left            */
+    { 0.20f, 0.80f, NAN,   350 },
+    { 0.50f, 0.92f, NAN,   350 },   /* back to the top */
+    { 0.50f, 0.50f, NAN,   600 },   /* settle centred  */
 };
 
 #define ANIM(id, d) { #id, d, s_frames_##id, \
@@ -317,6 +356,11 @@ static const eye_anim_t s_anims[] = {
     ANIM(roll, "roll the eyes in a full circle"),
 };
 #define ANIM_COUNT ((int)(sizeof(s_anims) / sizeof(s_anims[0])))
+
+/* Blinks are suppressed while an animation plays, so its timer expires during
+ * playback and fires the instant the mode reverts -- the eyes blink before the
+ * pose has settled. Hold them off briefly on the way out. */
+static int64_t s_settle_until;
 
 static const eye_anim_t *s_anim;
 static int       s_anim_frame;
@@ -433,6 +477,7 @@ static bool anim_tick(int64_t t)
 
     if (++s_anim_frame >= s_anim->count) {
         s_anim = NULL;
+        s_settle_until = t + EYE_ANIM_SETTLE_MS;
         return false;
     }
     anim_begin_frame(t);
@@ -491,7 +536,8 @@ static void motion_task(void *arg)
 
         /* Blink runs in every mode except calibration, where the whole point is
          * that nothing moves off 90°. */
-        if (s_mode != EYE_MODE_CALIBRATION && s_mode != EYE_MODE_ANIM) {
+        if (s_mode != EYE_MODE_CALIBRATION && s_mode != EYE_MODE_ANIM &&
+            t >= s_settle_until) {
             if (blink_phase == BLINK_IDLE && (s_blink_requested || t >= next_blink_at)) {
                 s_blink_requested = false;
                 blink_phase = BLINK_CLOSED;
@@ -579,6 +625,7 @@ static void motion_task(void *arg)
 
 esp_err_t eye_motion_start(void)
 {
+    load_lid_trim();
     if (xTaskCreate(motion_task, "eye_motion", 4096, NULL, 5, NULL) != pdPASS) {
         return ESP_ERR_NO_MEM;
     }

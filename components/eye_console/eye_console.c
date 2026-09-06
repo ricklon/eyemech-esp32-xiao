@@ -322,7 +322,11 @@ static void handle(char *line)
     else if (!strcmp(cmd, "mark"))     cmd_mark(&save);
     else if (!strcmp(cmd, "limits"))   cmd_limits(&save);
     else if (!strcmp(cmd, "cfg"))      cmd_cfg(&save);
-    else if (!strcmp(cmd, "save"))     report("save",     eye_servo_save());
+    else if (!strcmp(cmd, "save")) {
+        esp_err_t err = eye_servo_save();
+        if (err == ESP_OK) err = eye_motion_save_lid_trim();
+        report("save", err);
+    }
     else if (!strcmp(cmd, "safeboot")) {
         const char *v = next_tok(&save);
         if (v && (!strcmp(v, "on") || !strcmp(v, "off"))) {

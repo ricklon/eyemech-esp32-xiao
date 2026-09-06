@@ -31,6 +31,11 @@ extern "C" {
  * short enough that boot is not annoying. */
 #define EYE_RESUME_MS        600
 
+/* Quiet period after an animation finishes, before the blink state machine is
+ * allowed to run again — otherwise its suppressed timer fires immediately and
+ * the eyes blink before the final pose has settled. */
+#define EYE_ANIM_SETTLE_MS   900
+
 typedef enum {
     EYE_MODE_TRACKING = 0,  /* follow the Grove Vision module, blink on a timer */
     EYE_MODE_AUTO,          /* random gaze and blink — no vision module present  */
@@ -113,6 +118,11 @@ esp_err_t eye_motion_look(float lr_angle, float ud_angle);
  * Rewrites the four lid limits. */
 esp_err_t eye_motion_set_lid_trim(float progress);
 float     eye_motion_get_lid_trim(void);
+
+/* Persist the lid trim. Kept in its own NVS key, not in eye_servo's calibration
+ * blob — that struct's size is length-checked on load, so growing it would
+ * invalidate every stored limit. */
+esp_err_t eye_motion_save_lid_trim(void);
 
 /* Queue one blink; the state machine picks it up on the next tick. */
 esp_err_t eye_motion_request_blink(void);
