@@ -151,27 +151,30 @@ let the numbers land where they land.
 right were swapped relative to the reference fitted TR exactly, then BR
 contradicted it. The horns are indexed independently. Measure each one.
 
-**An axis with travel one way and none the other** has its horn in line with the
-pushrod at neutral. That is a crank dead point: rotation converts to almost no
-linear travel, and it is at or past over-centre, so it locks instead of moving.
-The servo then has nowhere to put its torque and **slips its own horn** — which
-looks like a calibration that will not hold.
+**An axis with travel one way and none the other — check for a fouled servo
+cable first.** On UD, 2026-09-05, 50° of down travel worked while 70° of up
+travel produced no motion at all. A trapped servo lead was physically blocking
+the linkage in one direction. Clearing it restored the full range immediately:
+40 down to 150 up, moving cleanly.
 
-Check it by eye with the servo at 90: horn and pushrod should be **roughly
-perpendicular**, which is where a crank gives maximum travel per degree and
-behaves symmetrically either side. In line is the fault.
+That is the boring, likely cause on a freshly reassembled mechanism, and it is
+worth ruling out before touching any hardware. Six servo leads run through a
+small space and they move with the mechanism.
 
-Fixing it means rotating the horn about a quarter turn — roughly 6 splines on a
-25-tooth output — and then adjusting the pushrod length to bring the axis back to
-neutral in the new orientation. Re-seating by a spline or two does not help; the
-geometry is wrong, not the index.
+The other candidate, only if the cable is clear, is the horn being in line with
+the pushrod at neutral — a crank dead point, where rotation converts to almost
+no linear travel and the linkage sits at or past over-centre. Check by eye with
+the servo at 90: horn and pushrod should be roughly perpendicular, which is where
+a crank gives the most travel per degree and behaves symmetrically. Fixing that
+means rotating the horn about a quarter turn and adjusting the pushrod length to
+restore neutral, not a spline-or-two re-index.
 
-Diagnosed on UD, 2026-09-05, after 50° of down travel worked and 70° of up
-travel produced no motion at all. BR showed the same signature earlier.
-
-**Stop the moment an axis stops responding.** Continuing to command a linkage
-that is not moving is what slips horns and breaks arms. "It is not moving" is a
-reason to stop and look, never a reason to send more.
+**Stop the moment an axis stops responding.** Whatever the cause, continuing to
+command a linkage that is not moving is what slips horns and breaks arms — the
+servo's torque has to go somewhere, and the horn splines are the usual place. UD
+was pushed a further 20° after being reported as not moving, and that most likely
+slipped its horn, costing a full remeasure. "It is not moving" is a reason to
+stop and look, never a reason to send more.
 
 **`!status` reports commanded angles, not measured ones.** A channel showing
 `90.0` while the servo rail is off is still reporting 90.0. `?` means the
