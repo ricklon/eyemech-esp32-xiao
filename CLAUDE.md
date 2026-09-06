@@ -14,11 +14,23 @@ implementation** — when the C behaves differently from those three files, the
 Python is right and the C is wrong, unless a deliberate change is recorded in
 `docs/decisions.md`. Do not edit `micropython/` to make the C look correct.
 
-**Status: builds and runs on a XIAO ESP32-S3.** Boot, I²C to the PCA9685 at
-0x40, the register readback, NVS save/load, the serial console, the WiFi profile
-sweep, the AP fallback and mDNS are all bench-verified with the servo rail off.
-**Nothing has been verified with servos powered** — no axis has moved, and every
-calibration constant is still Will Cogley's. The C6 builds but has had no bench
+**Status: running on a XIAO ESP32-S3, calibrated, and moving.** Boot, I²C to
+the PCA9685 at 0x40, the register readback, NVS save/load, the serial console,
+the WiFi profile sweep, the AP fallback and mDNS are bench-verified. All six
+axes have been driven under power and remeasured after the rebuild — LR 42/138,
+UD 40/140, TL 90/13, BL 93/172, TR 90/172, BR 90/15, recorded in `af314e3` — and
+the animations have been run and tuned on the mechanism (`a9899d7`). Joining a
+network by name and the console keystroke echo are verified on hardware too. The
+control page is the surface actually in use.
+
+**Those measured limits live in NVS, not in the source.** The defaults table in
+`eye_servo.c` is still Will Cogley's, so a board with erased NVS starts from his
+linkage geometry rather than this mechanism's. Erasing NVS means recalibrating
+before anything is driven, and the safe-boot flag exists for exactly that
+window.
+
+Still unproven: the PCA9685 oscillator has never been scoped, and the per-servo
+pulse range is still the 500–2500 µs default. The C6 builds but has had no bench
 time.
 
 ## The port's three deliberate changes
@@ -142,8 +154,11 @@ Do not invent these, and do not carry anything over from the Pico version.
 2. **Per-servo pulse range** — `eye_servo` defaults to 500–2500 µs. Servos that
    only honour 1000–2000 µs under-travel silently, which shows up here as lids
    that never fully close.
-3. **`servo_limits` per axis** — the checked-in values are Will Cogley's and
-   assume his linkage geometry.
+3. ~~**`servo_limits` per axis**~~ — **measured on this mechanism 2026-09-05**
+   and recorded in `af314e3`. The values are in NVS; the defaults compiled into
+   `eye_servo.c` are still Will Cogley's, so this only holds for a board whose
+   NVS has not been erased. Seat every horn at closed-90 before remeasuring —
+   measuring as-found horns is what broke a lid arm.
 4. ~~**Which servos are actually fitted**~~ — **MG90S**, confirmed at the bench
    2026-09-05. Size the supply for 6 V / 4–5 A. Metal gears do not strip the way
    SG90s do; an MG90S driven into a stop keeps pushing until the horn, linkage
