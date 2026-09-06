@@ -30,8 +30,10 @@
       first lid to come out with a clean 76° arc inside the servo's travel
 - [x] BL open end: **160**. BR open end: **20**. Both closed at 90
 - [x] TL lid arm reprinted and refitted, horn seated at closed-90 first
-- [x] **All six axes calibrated and saved.** LR 40/140, UD 42/138, TL 97/9,
-      BL 97/160, TR 89/165, BR 78/20 — see docs/CALIBRATION.md
+- [x] **All six axes calibrated and saved** (rebuild of 2026-09-05): LR 42/138,
+      UD 40/140, TL 90/13, BL 93/172, TR 90/172, BR 90/15 — see
+      docs/CALIBRATION.md. Supersedes the first attempt's values, void after the
+      Loctite damage and rebuild
 - [x] Every lid's closed end hunted rather than assumed; not one was at the
       nominal 90, the worst 12° out
 - [ ] `!safeboot off` and the first full run in auto mode

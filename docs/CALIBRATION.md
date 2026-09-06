@@ -102,26 +102,32 @@ be aware the second one's closed value depends on where you put the first.
 
 | Axis | Closed (`min`) | Open (`max`) | Arc | Notes |
 |---|---|---|---|---|
-| LR | 40 | 140 | 100° | Matches the reference table exactly |
-| UD | 42 | 138 | 96° | Bottom is a hard stop at 40, backed off 2°. Top capped — see `decisions.md` |
-| TL | 97 | 9 | 88° | Opens **downward**. Arm reprinted, horn reseated |
-| TR | 89 | 165 | 76° | Opens **upward** |
-| BL | 97 | 160 | 63° | Opens **upward**. Closed where it meets TL |
-| BR | 78 | 20 | 58° | Opens **downward**. Closed where it meets TR |
+| LR | 42 | 138 | 96° | Hard stops both ends, backed off 2°. Symmetric about 90 |
+| UD | 40 | 140 | 100° | 150 was available upward; capped at 140 to keep level gaze at the midpoint — see `decisions.md` |
+| TL | 90 | 13 | 77° | Opens **downward** |
+| BL | 93 | 172 | 79° | Opens **upward** |
+| TR | 90 | 172 | 82° | Opens **upward** |
+| BR | 90 | 15 | 75° | Opens **downward** |
+
+Measured after the rebuild of 2026-09-05. Every horn was seated at closed-90
+before measuring, and it shows: three of four lids closed at exactly 90 and the
+fourth at 93. The first attempt, measuring on as-found horns, produced 97, 97,
+89 and 78 — the worst 12° out — and cost a slipped horn and a broken lid arm.
+That single step is the difference.
 
 Stored in NVS, namespace `eyemech`, key `servo_cal_v1`.
 
 All six axes are measured. Nothing in the table is assumed.
 
-**Not one lid closed at the nominal 90.** TL 97, TR 89, BL 97, BR 78 — the worst
-12° out. Had those been left at the design value, every blink would have driven
-each lid past where it actually meets its partner, several times a minute,
-with nothing in the system able to report the load. Hunting the closed end is the
-single most valuable part of this procedure.
+**Hunt the closed end even when it lands on 90.** On the rebuild it did, three
+times out of four — but that is a result, not a default. On the first attempt the
+same four lids came out at 97, 97, 89 and 78, and had those been left at the
+nominal value every blink would have driven each lid past where it meets its
+partner, several times a minute, with nothing able to report the load.
 
-The two left lids meet at 97/97 and the two right at 89/78. The asymmetry between
-sides is expected — the horns are indexed independently — and is why the numbers
-must not be copied across.
+The numbers still must not be copied across sides: TL opens downward to 13 while
+TR opens upward to 172, for the same lid function. The horns are indexed
+independently and always will be.
 
 ## When to recalibrate
 
