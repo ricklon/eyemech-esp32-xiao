@@ -65,7 +65,7 @@ why it exists — WiFi is not a dependency for stopping the mechanism.
 ## Network
 
 The recovery access point is **always up**, in every station state. If no station
-profile connects, join `eyemech-setup` and browse to <http://192.168.4.1/>.
+profile connects, join `eyemech-setup` and browse to <http://192.168.9.1/>.
 Otherwise the board answers to `eyemech.local` over mDNS on either interface.
 
 Changing networks never needs a reflash:

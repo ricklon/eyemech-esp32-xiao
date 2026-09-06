@@ -2,7 +2,7 @@
 """eyectl -- drive the eyemech HTTP API from the command line.
 
     python tools/eyectl.py --host 192.168.1.50 state
-    python tools/eyectl.py --host 192.168.4.1 state    # on the recovery AP
+    python tools/eyectl.py --host 192.168.9.1 state    # on the recovery AP
     python tools/eyectl.py mode calibration
     python tools/eyectl.py look 110 80
     python tools/eyectl.py servo TL 120        # calibration mode only
@@ -56,9 +56,9 @@ def main():
     p = argparse.ArgumentParser(description=__doc__,
                                 formatter_class=argparse.RawDescriptionHelpFormatter)
     # The firmware advertises this over mDNS on both the station network and
-    # the recovery AP. 192.168.4.1 still works if mDNS is blocked.
+    # the recovery AP. 192.168.9.1 still works if mDNS is blocked.
     p.add_argument("--host", default="eyemech.local",
-                   help="IP or hostname; 192.168.4.1 on the recovery AP")
+                   help="IP or hostname; 192.168.9.1 on the recovery AP")
     sub = p.add_subparsers(dest="cmd", required=True)
 
     sub.add_parser("state")

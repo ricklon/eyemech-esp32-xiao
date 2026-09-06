@@ -49,7 +49,7 @@ pio device monitor
 
 No credentials to fill in first. On a board with nothing stored, the firmware
 brings up a recovery access point — `eyemech-setup`, password `eyemech123` —
-and waits. Join it and browse to <http://192.168.4.1/>, or set a network over
+and waits. Join it and browse to <http://192.168.9.1/>, or set a network over
 the serial console:
 
 ```
@@ -74,7 +74,7 @@ default, so a typo does not survive a power cycle.
 
 mDNS advertises `eyemech.local` on both interfaces, so the board answers to
 that name whether it joined your network or you joined its access point — which
-is what `eyectl` defaults to. `--host 192.168.4.1` is the fallback if mDNS is
+is what `eyectl` defaults to. `--host 192.168.9.1` is the fallback if mDNS is
 blocked, as it is on some corporate networks.
 
 ## Modes

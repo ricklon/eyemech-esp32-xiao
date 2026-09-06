@@ -35,7 +35,13 @@ static const char *TAG = "eye_net";
 
 #define AP_CHANNEL      6
 #define AP_MAX_CONN     4
-#define AP_IP_ADDR      "192.168.4.1"
+/* Not 192.168.4.1. That is IDF's default and also one of the most common home
+ * router subnets — and this radio is APSTA at all times, so the station can be
+ * on a LAN that overlaps the access point the recovery page lives on. Seen on
+ * the bench: a router handing out 192.168.4.0/22 with gateway 192.168.4.1,
+ * exactly the AP's own address. */
+#define AP_IP_ADDR      "192.168.9.1"
+#define AP_NETMASK      "255.255.255.0"
 #define STA_MAX_RETRIES 3
 /* Idle time on the AP before sweeping the profile list again, so a network
  * that drops out for a few minutes is picked back up unattended. */
@@ -540,6 +546,27 @@ static void manager_task(void *arg)
 
 /* ------------------------------------------------------------------- api */
 
+/* esp_netif's default softAP address has to be overridden explicitly; setting
+ * AP_IP_ADDR alone would only change what the firmware claims. */
+static esp_err_t configure_ap_address(void)
+{
+    esp_netif_ip_info_t ip = { 0 };
+    ip.ip.addr      = esp_ip4addr_aton(AP_IP_ADDR);
+    ip.gw.addr      = esp_ip4addr_aton(AP_IP_ADDR);
+    ip.netmask.addr = esp_ip4addr_aton(AP_NETMASK);
+
+    /* The DHCP server advertises its own address as the gateway, so it cannot
+     * be running while that address changes. Already stopped is fine — nothing
+     * has started it yet on the first call. */
+    esp_err_t err = esp_netif_dhcps_stop(s_ap_netif);
+    if (err != ESP_OK && err != ESP_ERR_ESP_NETIF_DHCP_ALREADY_STOPPED) {
+        ESP_RETURN_ON_ERROR(err, TAG, "dhcps stop");
+    }
+    ESP_RETURN_ON_ERROR(esp_netif_set_ip_info(s_ap_netif, &ip), TAG, "ap ip");
+    ESP_RETURN_ON_ERROR(esp_netif_dhcps_start(s_ap_netif), TAG, "dhcps start");
+    return ESP_OK;
+}
+
 static esp_err_t configure_softap(void)
 {
     const size_t plen = strlen(CONFIG_EYE_NET_AP_PASSWORD);
@@ -570,6 +597,7 @@ esp_err_t eye_net_start(void)
     s_ap_netif  = esp_netif_create_default_wifi_ap();
     ESP_RETURN_ON_FALSE(s_sta_netif && s_ap_netif, ESP_ERR_NO_MEM, TAG, "netifs");
     esp_netif_set_hostname(s_sta_netif, CONFIG_EYE_NET_HOSTNAME);
+    ESP_RETURN_ON_ERROR(configure_ap_address(), TAG, "ap address");
 
     wifi_init_config_t init = WIFI_INIT_CONFIG_DEFAULT();
     ESP_RETURN_ON_ERROR(esp_wifi_init(&init), TAG, "wifi init");
