@@ -105,6 +105,14 @@ Measure the horn against the card and print the matching variant — a reprinted
 arm is not interchangeable if the horn differs. Worth checking before printing a
 spare, since the arm is the part that has failed here.
 
+**Do not use threadlocker or CA glue on the printed linkage parts.** Loctite-type
+anaerobic threadlockers contain methacrylate esters that attack many
+thermoplastics, and cyanoacrylate crazes others; both cause stress cracking that
+shows up at exactly the loaded joints you were trying to secure. A set of
+linkage joints was lost this way on 2026-09-05. Use mechanical retention
+instead — nylon-insert nuts, a captive nut, or a friction fit — and if a
+fastener must be secured, secure it against a metal part rather than the print.
+
 **Print lid arms at 0.20 mm layer height in a strength preset.** These are small
 parts under repeated load from a metal-geared servo with no stall detection, so
 layer adhesion matters more than surface finish. The arm that broke was the

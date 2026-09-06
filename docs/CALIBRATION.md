@@ -123,6 +123,23 @@ The two left lids meet at 97/97 and the two right at 89/78. The asymmetry betwee
 sides is expected — the horns are indexed independently — and is why the numbers
 must not be copied across.
 
+## When to recalibrate
+
+Any mechanical change invalidates the affected axis. Specifically:
+
+- **Refitting a horn** — the whole range shifts. Both ends need remeasuring.
+- **Replacing a linkage or arm** — the arc changes even if the horn is untouched.
+- **A joint failing or being repaired** — same.
+- **A slipped horn** — the stored numbers are now meaningless, and worse, they
+  look plausible. Discard them rather than trusting them.
+
+The stored values stay useful as a *starting reference* after a rebuild — they
+tell you roughly where the ends were — but must be remeasured, not assumed.
+
+Before any mechanical work: `!release`, then `!safeboot on` so the board cannot
+drive the mechanism to stale angles on a reset. Cut the servo rail as well if you
+are working on linkages.
+
 ## Things that are not true, that look true
 
 **Servo angles do not transfer between sides.** TR is `(89, 165)` and TL is
