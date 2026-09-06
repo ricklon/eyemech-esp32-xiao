@@ -39,6 +39,9 @@
   #anims .d { color:var(--dim); font-size:.72rem; font-weight:400; }
   .check { display:inline-flex; align-items:center; gap:.35rem; margin:0; }
   .check span { min-width:0; }
+  select { font:inherit; padding:.25rem .4rem; background:transparent; color:inherit;
+           border:1px solid var(--line); border-radius:5px; }
+  #jognow { color:var(--dim); font-size:.8rem; align-self:center; }
 </style>
 </head>
 <body>
@@ -80,6 +83,31 @@
 <fieldset>
   <legend>Lid trim — how wide the eyes open</legend>
   <label><span>Openness</span><input type="range" id="trim" min="0" max="1" step="0.01" value="0.5"></label>
+</fieldset>
+
+<fieldset id="jogbox" hidden>
+  <legend>Jog — relative steps, for establishing direction</legend>
+  <p class="warn">After any mechanical change, take ONE step and watch which way the
+  linkage goes before jogging further. A lid rests against its closed stop, so the
+  closing direction has no headroom — and these servos have the torque to break a
+  printed part rather than stall.</p>
+  <div class="row">
+    <label class="check"><span>Servo</span><select id="jogservo"></select></label>
+    <label class="check"><span>Step</span><select id="jogstep">
+      <option value="2" selected>2°</option>
+      <option value="5">5°</option>
+      <option value="10">10°</option>
+    </select></label>
+  </div>
+  <div class="row">
+    <button id="jogminus">− step</button>
+    <button id="jogplus">+ step</button>
+    <span id="jognow"></span>
+  </div>
+  <div class="row">
+    <button id="markmin">Mark as min (closed)</button>
+    <button id="markmax">Mark as max (open)</button>
+  </div>
 </fieldset>
 
 <fieldset>
@@ -167,6 +195,37 @@ function renderAnims() {
       .then(refresh));
 }
 
+/* --- jog and mark ------------------------------------------------------ */
+const jogBox = document.getElementById('jogbox');
+const jogNow = document.getElementById('jognow');
+const jogSel = document.getElementById('jogservo');
+
+function fillJogServos() {
+  if (jogSel.childElementCount === state.servos.length) return;
+  jogSel.innerHTML = state.servos.map(s => `<option>${s.name}</option>`).join('');
+}
+
+/* Every one of these can be refused — wrong mode, or a servo whose position is
+   unknown because nothing has commanded it yet — so report what came back
+   rather than assuming it moved. */
+async function calPost(path, body, describe) {
+  const r = await post(path, { servo: jogSel.value, ...body });
+  let d = {};
+  try { d = await r.json(); } catch (e) { /* no body */ }
+  jogNow.textContent = r.ok ? describe(d) : (d.error || `refused (${r.status})`);
+  refresh();
+}
+
+const jogStep = () => +document.getElementById('jogstep').value;
+document.getElementById('jogminus').onclick = () =>
+  calPost('/api/jog', { delta: -jogStep() }, d => `${jogSel.value} → ${d.angle.toFixed(1)}°`);
+document.getElementById('jogplus').onclick = () =>
+  calPost('/api/jog', { delta:  jogStep() }, d => `${jogSel.value} → ${d.angle.toFixed(1)}°`);
+document.getElementById('markmin').onclick = () =>
+  calPost('/api/mark', { end: 'min' }, d => `${jogSel.value} min = ${d.min.toFixed(1)}° — Save to keep`);
+document.getElementById('markmax').onclick = () =>
+  calPost('/api/mark', { end: 'max' }, d => `${jogSel.value} max = ${d.max.toFixed(1)}° — Save to keep`);
+
 /* --- servo table ------------------------------------------------------- */
 function rowHtml(s) {
   const a = Number.isFinite(s.angle) ? s.angle.toFixed(1) : '—';
@@ -199,6 +258,8 @@ async function refresh() {
     document.querySelectorAll('#modes button').forEach(b =>
       b.setAttribute('aria-pressed', b.dataset.mode === state.mode));
     document.getElementById('calnote').hidden = state.mode !== 'calibration';
+    jogBox.hidden = state.mode !== 'calibration';   /* the API refuses anyway */
+    fillJogServos();
     renderAnims();
     animBox.querySelectorAll('button').forEach(b =>
       b.setAttribute('aria-pressed', b.dataset.anim === state.anim));

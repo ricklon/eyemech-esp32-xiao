@@ -55,6 +55,17 @@ static esp_err_t send_ok(httpd_req_t *req)
     return send_json(req, root);
 }
 
+/* esp_http_server's error enum has no 409. Wrong mode, or a servo whose
+ * position is unknown, is a conflict rather than a malformed request, so set
+ * the status line directly — eyectl surfaces the code verbatim. */
+static esp_err_t send_409(httpd_req_t *req, const char *why)
+{
+    cJSON *root = cJSON_CreateObject();
+    cJSON_AddStringToObject(root, "error", why);
+    httpd_resp_set_status(req, "409 Conflict");
+    return send_json(req, root);
+}
+
 static float jnum(const cJSON *o, const char *key, float fallback)
 {
     const cJSON *v = cJSON_GetObjectItemCaseSensitive(o, key);
@@ -203,12 +214,7 @@ static esp_err_t blink_post(httpd_req_t *req)
 static esp_err_t servo_post(httpd_req_t *req)
 {
     if (eye_motion_get_mode() != EYE_MODE_CALIBRATION) {
-        /* esp_http_server's error enum has no 409, so set the status line
-         * directly. "Wrong mode" is a conflict, not a malformed request, and
-         * eyectl surfaces the code verbatim. */
-        httpd_resp_set_status(req, "409 Conflict");
-        httpd_resp_set_type(req, "application/json");
-        return httpd_resp_sendstr(req, "{\"error\":\"not in calibration mode\"}");
+        return send_409(req, "not in calibration mode");
     }
     cJSON *body = NULL;
     if (read_json(req, &body) != ESP_OK) {
@@ -220,6 +226,71 @@ static esp_err_t servo_post(httpd_req_t *req)
     if (id < 0) return httpd_resp_send_err(req, HTTPD_400_BAD_REQUEST, "bad servo");
     eye_servo_write((eye_servo_id_t)id, angle);
     return send_ok(req);
+}
+
+/* Relative steps. The safe primitive after any mechanical change: take one
+ * small step and watch which way the linkage actually goes, rather than typing
+ * an absolute angle at a lid that has no headroom in the closing direction. */
+static esp_err_t jog_post(httpd_req_t *req)
+{
+    if (eye_motion_get_mode() != EYE_MODE_CALIBRATION) {
+        return send_409(req, "not in calibration mode");
+    }
+    cJSON *body = NULL;
+    if (read_json(req, &body) != ESP_OK) {
+        return httpd_resp_send_err(req, HTTPD_400_BAD_REQUEST, "bad json");
+    }
+    int id = jservo(body);
+    float delta = jnum(body, "delta", 0.0f);
+    cJSON_Delete(body);
+    if (id < 0) return httpd_resp_send_err(req, HTTPD_400_BAD_REQUEST, "bad servo");
+
+    esp_err_t err = eye_servo_jog((eye_servo_id_t)id, delta);
+    if (err == ESP_ERR_INVALID_STATE) {
+        /* No feedback on these servos: there is nothing to step from until
+         * something has been commanded. */
+        return send_409(req, "position unknown — set an angle first");
+    }
+    if (err != ESP_OK) return httpd_resp_send_err(req, HTTPD_400_BAD_REQUEST, "jog refused");
+
+    cJSON *root = cJSON_CreateObject();
+    cJSON_AddBoolToObject(root, "ok", true);
+    cJSON_AddNumberToObject(root, "angle", eye_servo_read((eye_servo_id_t)id));
+    return send_json(req, root);
+}
+
+/* Command-and-confirm, never capture-and-record: the angle being marked is the
+ * one the firmware commanded, and a human decides it is the endpoint. */
+static esp_err_t mark_post(httpd_req_t *req)
+{
+    if (eye_motion_get_mode() != EYE_MODE_CALIBRATION) {
+        return send_409(req, "not in calibration mode");
+    }
+    cJSON *body = NULL;
+    if (read_json(req, &body) != ESP_OK) {
+        return httpd_resp_send_err(req, HTTPD_400_BAD_REQUEST, "bad json");
+    }
+    int id = jservo(body);
+    const cJSON *e = cJSON_GetObjectItemCaseSensitive(body, "end");
+    bool as_max = cJSON_IsString(e) && strcmp(e->valuestring, "max") == 0;
+    bool as_min = cJSON_IsString(e) && strcmp(e->valuestring, "min") == 0;
+    cJSON_Delete(body);   /* e is dead from here */
+    if (id < 0)                return httpd_resp_send_err(req, HTTPD_400_BAD_REQUEST, "bad servo");
+    if (!as_max && !as_min)    return httpd_resp_send_err(req, HTTPD_400_BAD_REQUEST, "end must be min or max");
+
+    esp_err_t err = eye_servo_mark((eye_servo_id_t)id, as_max);
+    if (err == ESP_ERR_INVALID_STATE) {
+        return send_409(req, "position unknown — set an angle first");
+    }
+    if (err != ESP_OK) return httpd_resp_send_err(req, HTTPD_400_BAD_REQUEST, "mark refused");
+
+    eye_limits_t l = eye_servo_limits((eye_servo_id_t)id);
+    cJSON *root = cJSON_CreateObject();
+    cJSON_AddBoolToObject(root, "ok", true);
+    cJSON_AddNumberToObject(root, "angle", eye_servo_read((eye_servo_id_t)id));
+    cJSON_AddNumberToObject(root, "min", l.min);
+    cJSON_AddNumberToObject(root, "max", l.max);
+    return send_json(req, root);   /* not persisted — /api/save keeps it */
 }
 
 static esp_err_t limits_post(httpd_req_t *req)
@@ -291,6 +362,8 @@ static const httpd_uri_t s_routes[] = {
     { .uri = "/api/anim",     .method = HTTP_POST, .handler = anim_post },
     { .uri = "/api/anim/stop",.method = HTTP_POST, .handler = anim_stop_post },
     { .uri = "/api/servo",    .method = HTTP_POST, .handler = servo_post },
+    { .uri = "/api/jog",      .method = HTTP_POST, .handler = jog_post },
+    { .uri = "/api/mark",     .method = HTTP_POST, .handler = mark_post },
     { .uri = "/api/limits",   .method = HTTP_POST, .handler = limits_post },
     { .uri = "/api/cfg",      .method = HTTP_POST, .handler = cfg_post },
     { .uri = "/api/save",     .method = HTTP_POST, .handler = save_post },
