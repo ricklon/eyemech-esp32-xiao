@@ -72,14 +72,27 @@ Changing networks never needs a reflash:
 
 ```
 !wifi scan
-!wifi set 1 "Some Network" thepassword
-!wifi connect 1
+!wifi set "Some Network" thepassword
 ```
 
-Four profiles are stored in NVS and swept in turn — three retries each, then the
-list is re-checked every two minutes while parked on the access point. Only a
-profile that actually obtained an IP becomes the boot default, so a typo does not
-survive a power cycle.
+`!wifi set` joins first and saves second. The credentials are tried live, and
+they are written to a profile only once the station reaches an IP — a wrong
+password reports `nothing saved`, leaves the profile list untouched, and drops
+back to whatever network was working. Expect it to take up to half a minute to
+say so: a refused association costs several seconds and there are three retries
+behind the first attempt.
+
+The four profiles are a FIFO, so nothing has to name a slot. A new network takes
+a free one, and evicts the least recently joined when all four are full; joining
+a network already on the list refreshes it in place instead of consuming a second
+slot. `!wifi list` names the entry the next join would replace once the list is
+full. `!wifi set <n> <ssid> <password>` still writes slot `n` directly, without
+trying the credentials — that is the one path where a typo can be stored.
+
+Profiles are swept in turn — three retries each, then the list is re-checked
+every two minutes while parked on the access point. Only a profile that actually
+obtained an IP becomes the boot default, so a typo does not survive a power
+cycle.
 
 ## What survives what
 

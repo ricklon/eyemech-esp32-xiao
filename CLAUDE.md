@@ -47,10 +47,13 @@ pio run -e xiao_esp32c6 -t menuconfig   # promote keepers to sdkconfig.defaults
 ```
 
 WiFi credentials are no longer compiled in — `secrets.h` is gone. Set them at
-runtime over the serial console (`!wifi set 1 <ssid> <password>`), where they go
-to NVS. `pio run -t menuconfig` → *eyemech networking* can seed profile 1 for a
-first boot; that lands in the gitignored `sdkconfig`, never in
-`sdkconfig.defaults`. Never paste credentials into a commit message or a doc.
+runtime over the serial console (`!wifi set <ssid> <password>`), which joins the
+network and writes it to NVS only if it works. The four profiles are a FIFO, so
+no slot number is involved; `!wifi set <n> <ssid> <password>` still writes a
+specific slot without testing it. `pio run -t menuconfig` → *eyemech networking*
+can seed profile 1 for a first boot; that lands in the gitignored `sdkconfig`,
+never in `sdkconfig.defaults`. Never paste credentials into a commit message or
+a doc.
 
 `sdkconfig*` is generated and gitignored; `sdkconfig.defaults` is the checked-in
 source of truth.
@@ -111,6 +114,15 @@ into the FIFO and leaves it there, so anything printed mid-line — a keystroke
 echo, a progress dot — is invisible until a newline flushes the whole line at
 once. `fsync(fileno(stdout))` is what actually flushes; `eye_console` wraps the
 pair as `push_stdout()`.
+
+**`esp_wifi_disconnect()` does not take effect before the next line of C.**
+Setting a station config while an association is in flight is refused (*"sta is
+connecting"*), and `esp_wifi_connect()` while a link is still up is ignored
+(*"sta is connected, disconnect before connecting to new ap"*). The second one
+is silent and dangerous: the old network stays connected, its next IP event
+arrives, and untested credentials look like they worked. `sta_connect()` polls
+`esp_wifi_sta_get_ap_info()` until the radio agrees it is down before
+reconfiguring. Do not replace that with a fixed delay.
 
 **Timing is wall-clock, not loop counts.** The original's
 `random.randrange(20000)` blink interval was tied to the Pico's loop rate and

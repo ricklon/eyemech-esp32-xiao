@@ -54,11 +54,13 @@ the serial console:
 
 ```
 !wifi scan
-!wifi set 1 "My Network" hunter2
-!wifi connect 1
+!wifi set "My Network" hunter2
 ```
 
-Credentials go to NVS, so changing networks never needs a reflash.
+The board tries the credentials straight away and stores them only if they reach
+an IP, so a typo costs an attempt rather than a saved profile. Four profiles are
+kept, oldest evicted first, and nothing has to name a slot. Credentials go to
+NVS, so changing networks never needs a reflash.
 
 ## Networking
 

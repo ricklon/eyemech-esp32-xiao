@@ -92,7 +92,8 @@ static void cmd_help(void)
     "  !wifi                      link, SSID, IP, access point\r\n"
     "  !wifi list                 saved profiles\r\n"
     "  !wifi scan                 nearby networks\r\n"
-    "  !wifi set <n> <ssid> [pw]  save a profile (omit pw if open)\r\n"
+    "  !wifi set <ssid> [pw]      join now, saved only if it works\r\n"
+    "  !wifi set <n> <ssid> [pw]  write profile n without trying it\r\n"
     "  !wifi connect <n>          switch to profile n\r\n"
     "  !wifi clear <n>            forget profile n\r\n"
     "  !wifi ap                   stop roaming, stay on the access point\r\n"
@@ -161,10 +162,19 @@ static void cmd_wifi(char **save)
     }
 
     if (!strcmp(sub, "list")) {
+        int oldest = eye_net_oldest_profile();
+        int used = 0;
         for (int i = 0; i < EYE_NET_PROFILES; i++) {
             eye_net_profile_ssid(i, buf, sizeof(buf));
+            if (buf[0]) used++;
             printf("  [%d] %s%s\r\n", i + 1, buf[0] ? buf : "(empty)",
                    i == eye_net_active_profile() ? "   <- boot default" : "");
+        }
+        /* Only worth mentioning when the next join actually costs something. */
+        if (used == EYE_NET_PROFILES && oldest >= 0) {
+            eye_net_profile_ssid(oldest, buf, sizeof(buf));
+            printf("  full — the next network you join replaces [%d] %s\r\n",
+                   oldest + 1, buf);
         }
         return;
     }
@@ -184,18 +194,57 @@ static void cmd_wifi(char **save)
         return;
     }
 
-    if (!strcmp(sub, "set")) {
-        const char *slot = next_tok(save);
-        const char *ssid = next_tok(save);
-        const char *pass = next_tok(save);   /* absent = open network */
-        if (!slot || !ssid) {
-            printf("usage: !wifi set <1-%d> <ssid> [password]\r\n", EYE_NET_PROFILES);
+    if (!strcmp(sub, "set") || !strcmp(sub, "join")) {
+        const char *a = next_tok(save);
+        const char *b = next_tok(save);
+        const char *c = next_tok(save);   /* absent = open network */
+
+        /* A bare slot digit with an SSID behind it still writes that slot
+         * outright. Everything else is the common case — credentials, no slot
+         * — and goes through the join, which picks the slot itself. */
+        bool is_slot = a && a[0] >= '1' && a[0] <= '0' + EYE_NET_PROFILES && a[1] == '\0';
+        if (is_slot && b) {
+            int n = a[0] - '1';
+            esp_err_t err = eye_net_set_profile(n, b, c ? c : "");
+            if (err == ESP_OK) printf("profile %d written — !wifi connect %d\r\n", n + 1, n + 1);
+            else               printf("could not save: %s\r\n", esp_err_to_name(err));
             return;
         }
-        int n = atoi(slot) - 1;
-        esp_err_t err = eye_net_set_profile(n, ssid, pass ? pass : "");
-        if (err == ESP_OK) printf("profile %d saved — !wifi connect %d\r\n", n + 1, n + 1);
-        else               printf("could not save: %s\r\n", esp_err_to_name(err));
+        if (!a) {
+            printf("usage: !wifi set <ssid> [password]\r\n"
+                   "       !wifi set <1-%d> <ssid> [password]   (no join, writes the slot)\r\n",
+                   EYE_NET_PROFILES);
+            return;
+        }
+
+        esp_err_t err = eye_net_join(a, b ? b : "");
+        if (err != ESP_OK) {
+            printf("could not start join: %s\r\n", esp_err_to_name(err));
+            return;
+        }
+        printf("joining '%s'...\r\n", a);   /* the password is never echoed */
+        fflush(stdout);
+
+        /* The attempt runs on the network manager task. A wrong password on
+         * WPA3 costs about six seconds per association attempt and there are
+         * three retries behind the first try, so the verdict can be 25s away;
+         * wait long enough to actually report it. */
+        int slot = -1;
+        eye_net_join_state_t st = EYE_NET_JOIN_BUSY;
+        for (int i = 0; i < 180; i++) {
+            st = eye_net_join_result(&slot);
+            if (st != EYE_NET_JOIN_BUSY) break;
+            vTaskDelay(pdMS_TO_TICKS(250));
+        }
+
+        if (st == EYE_NET_JOIN_OK) {
+            eye_net_ip(buf, sizeof(buf));
+            printf("joined '%s' — saved as profile %d, http://%s/\r\n", a, slot + 1, buf);
+        } else if (st == EYE_NET_JOIN_BUSY) {
+            printf("still trying — check !wifi status\r\n");
+        } else {
+            printf("could not join '%s' — nothing saved, check the password\r\n", a);
+        }
         return;
     }
 
@@ -211,7 +260,10 @@ static void cmd_wifi(char **save)
 
     if (!strcmp(sub, "ap")) { report("ap", eye_net_force_ap()); return; }
 
-    printf("usage: !wifi [status|list|scan|set|connect|clear|ap]\r\n");
+    /* The natural first guess is "!wifi <ssid> <password>", which lands here.
+     * Say what to type instead of only listing subcommands. */
+    printf("usage: !wifi [status|list|scan|set|join|connect|clear|ap]\r\n"
+           "to join a network: !wifi set <ssid> [password]\r\n");
 }
 
 static void cmd_mode(char **save)

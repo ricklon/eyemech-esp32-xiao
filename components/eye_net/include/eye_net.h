@@ -24,8 +24,9 @@
  *      refuses to associate with open networks.
  *   4. Switching profiles forces a disconnect; those self-induced disconnect
  *      events are drained rather than charged to the new profile's retries.
- *   5. Only a profile that actually reached IP_EVENT_STA_GOT_IP is written to
- *      NVS as the boot default. A typo must not survive a power cycle.
+ *   5. Only credentials that actually reached IP_EVENT_STA_GOT_IP are written
+ *      to NVS, both as the boot default and as a profile at all. A typo must
+ *      not survive a power cycle.
  *
  * Credentials live in NVS (namespace "eyenet"), seeded once from Kconfig if
  * NVS is empty. Nothing is compiled in, and nothing is logged.
@@ -75,6 +76,29 @@ esp_err_t eye_net_set_profile(int n, const char *ssid, const char *password);
 esp_err_t eye_net_clear_profile(int n);
 esp_err_t eye_net_connect_profile(int n);
 esp_err_t eye_net_force_ap(void);             /* stop roaming, stay on the AP */
+int       eye_net_oldest_profile(void);       /* next to be evicted, or -1 */
+
+/* Joining by name, which is how credentials normally arrive: the SSID and
+ * password are tried live and written to a profile only once the station
+ * reaches an IP. Nothing is stored on the way in, so a typo costs an attempt
+ * rather than a slot, and invariant 5 above holds by construction.
+ *
+ * The four profiles are a FIFO. A new network takes a free slot if there is
+ * one and evicts the least recently joined if there is not, so joining never
+ * asks which slot to use. Re-joining a network already on the list refreshes
+ * that entry in place instead of consuming a second slot.
+ *
+ * The attempt runs on the manager task: call join, then poll join_result. */
+typedef enum {
+    EYE_NET_JOIN_IDLE,
+    EYE_NET_JOIN_BUSY,
+    EYE_NET_JOIN_OK,
+    EYE_NET_JOIN_FAILED,
+} eye_net_join_state_t;
+
+esp_err_t eye_net_join(const char *ssid, const char *password);
+/* Writes the profile the join landed in through *slot when it succeeded. */
+eye_net_join_state_t eye_net_join_result(int *slot);
 
 /* Scan runs on the manager task: start it, poll busy, then copy results. */
 esp_err_t eye_net_scan_start(void);
