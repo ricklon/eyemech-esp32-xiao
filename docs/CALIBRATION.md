@@ -151,10 +151,27 @@ let the numbers land where they land.
 right were swapped relative to the reference fitted TR exactly, then BR
 contradicted it. The horns are indexed independently. Measure each one.
 
-**A lid that "moves but never fully opens"** is a horn indexed about 90° out: at
-the flat end of the crank's arc, large servo rotation produces little linkage
-travel, and it is near over-centre where it binds. Re-seat it rather than
-chasing more travel.
+**An axis with travel one way and none the other** has its horn in line with the
+pushrod at neutral. That is a crank dead point: rotation converts to almost no
+linear travel, and it is at or past over-centre, so it locks instead of moving.
+The servo then has nowhere to put its torque and **slips its own horn** — which
+looks like a calibration that will not hold.
+
+Check it by eye with the servo at 90: horn and pushrod should be **roughly
+perpendicular**, which is where a crank gives maximum travel per degree and
+behaves symmetrically either side. In line is the fault.
+
+Fixing it means rotating the horn about a quarter turn — roughly 6 splines on a
+25-tooth output — and then adjusting the pushrod length to bring the axis back to
+neutral in the new orientation. Re-seating by a spline or two does not help; the
+geometry is wrong, not the index.
+
+Diagnosed on UD, 2026-09-05, after 50° of down travel worked and 70° of up
+travel produced no motion at all. BR showed the same signature earlier.
+
+**Stop the moment an axis stops responding.** Continuing to command a linkage
+that is not moving is what slips horns and breaks arms. "It is not moving" is a
+reason to stop and look, never a reason to send more.
 
 **`!status` reports commanded angles, not measured ones.** A channel showing
 `90.0` while the servo rail is off is still reporting 90.0. `?` means the
