@@ -45,7 +45,7 @@
   .check span { min-width:0; }
   select { font:inherit; padding:.25rem .4rem; background:transparent; color:inherit;
            border:1px solid var(--line); border-radius:5px; }
-  #jognow { color:var(--dim); font-size:.8rem; align-self:center; }
+  #jognow, #servomsg { color:var(--dim); font-size:.8rem; align-self:center; }
   .num { min-width:2.5rem; text-align:right; font-variant-numeric:tabular-nums; }
 </style>
 </head>
@@ -135,7 +135,14 @@
       <tbody id="servos"></tbody>
     </table>
   </div>
-  <div class="row"><button id="save">Save to NVS</button></div>
+  <div class="row">
+    <button id="save">Save to NVS</button>
+    <button id="defaults">Reset to defaults…</button>
+    <label class="check"><input type="checkbox" id="safeboot"><span>Safe boot</span></label>
+    <span id="servomsg"></span>
+  </div>
+  <p class="warn" id="sbnote" hidden>Safe boot is OFF: the mechanism will drive to
+  neutral on its own at the next power-up, with nobody's hand near the supply.</p>
 </fieldset>
 
 <script>
@@ -271,6 +278,27 @@ document.getElementById('markmin').onclick = () =>
 document.getElementById('markmax').onclick = () =>
   calPost('/api/mark', { end: 'max' }, d => `${jogSel.value} max = ${d.max.toFixed(1)}° — Save to keep`);
 
+/* --- safe boot and defaults -------------------------------------------- */
+const servoMsg = document.getElementById('servomsg');
+
+/* Persisted the instant it changes, unlike the rest of this page. */
+document.getElementById('safeboot').onchange = e =>
+  post('/api/safeboot', { on: e.target.checked }).then(refresh);
+
+document.getElementById('defaults').onclick = async () => {
+  if (!confirm('Discard every measured limit and pulse range, back to the built-in '
+             + 'defaults?\n\nNothing is written to NVS until you press Save, so a '
+             + 'reboot undoes this.')) return;
+  const r = await post('/api/defaults', { confirm: 'defaults' });
+  let d = {};
+  try { d = await r.json(); } catch (e) { /* no body */ }
+  servoMsg.textContent = r.ok
+    ? 'back to defaults — not saved; reboot undoes it, Save keeps it'
+    : (d.error || `refused (${r.status})`);
+  dirty = false;
+  refresh();
+};
+
 /* --- servo table ------------------------------------------------------- */
 function rowHtml(s) {
   const a = Number.isFinite(s.angle) ? s.angle.toFixed(1) : '—';
@@ -311,6 +339,9 @@ async function refresh() {
     document.getElementById('calnote').hidden = state.mode !== 'calibration';
     jogBox.hidden = state.mode !== 'calibration';   /* the API refuses anyway */
     fillJogServos();
+    const sb = document.getElementById('safeboot');
+    if (document.activeElement !== sb) sb.checked = !!state.safe_boot;
+    document.getElementById('sbnote').hidden = !!state.safe_boot;
     syncSlider('trim', state.lid_trim);
     syncSlider('cu', state.coeff_upper);
     syncSlider('cl', state.coeff_lower);

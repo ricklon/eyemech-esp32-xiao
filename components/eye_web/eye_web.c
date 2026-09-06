@@ -93,6 +93,7 @@ static esp_err_t state_get(httpd_req_t *req)
     cJSON_AddStringToObject(root, "board", EYEMECH_BOARD_NAME);
     cJSON_AddBoolToObject(root, "vision", eye_vision_present());
     cJSON_AddBoolToObject(root, "released", eye_servo_is_released());
+    cJSON_AddBoolToObject(root, "safe_boot", eye_servo_safe_boot());
 
     /* Objects rather than bare names: the page has nothing to label a button
      * with otherwise, and the descriptions already exist in the table. */
@@ -349,6 +350,56 @@ static esp_err_t cfg_post(httpd_req_t *req)
     return send_ok(req);
 }
 
+/* Whether the board comes up released. Persisted the moment it is set, unlike
+ * everything else here — it has to survive the crash it exists to protect
+ * against, so it does not wait for /api/save. */
+static esp_err_t safeboot_post(httpd_req_t *req)
+{
+    cJSON *body = NULL;
+    if (read_json(req, &body) != ESP_OK) {
+        return httpd_resp_send_err(req, HTTPD_400_BAD_REQUEST, "bad json");
+    }
+    const cJSON *v = cJSON_GetObjectItemCaseSensitive(body, "on");
+    bool valid = cJSON_IsBool(v);
+    bool on    = cJSON_IsTrue(v);
+    cJSON_Delete(body);
+    if (!valid) return httpd_resp_send_err(req, HTTPD_400_BAD_REQUEST, "on must be true or false");
+    if (eye_servo_set_safe_boot(on) != ESP_OK) {
+        return httpd_resp_send_err(req, HTTPD_500_INTERNAL_SERVER_ERROR, "nvs write failed");
+    }
+    return send_ok(req);
+}
+
+/* Throws away every measured limit and pulse range. Two things stand between a
+ * stray POST and a mechanism's calibration: it only works in calibration mode,
+ * and it needs the confirm token. It is also RAM-only — eye_servo_reset_defaults()
+ * does not touch NVS — so a reboot undoes it and only /api/save makes it real. */
+static esp_err_t defaults_post(httpd_req_t *req)
+{
+    if (eye_motion_get_mode() != EYE_MODE_CALIBRATION) {
+        return send_409(req, "not in calibration mode");
+    }
+    cJSON *body = NULL;
+    if (read_json(req, &body) != ESP_OK) {
+        return httpd_resp_send_err(req, HTTPD_400_BAD_REQUEST, "bad json");
+    }
+    const cJSON *c = cJSON_GetObjectItemCaseSensitive(body, "confirm");
+    bool confirmed = cJSON_IsString(c) && strcmp(c->valuestring, "defaults") == 0;
+    cJSON_Delete(body);
+    if (!confirmed) {
+        return httpd_resp_send_err(req, HTTPD_400_BAD_REQUEST,
+            "send {\"confirm\":\"defaults\"} — this discards every measured limit");
+    }
+
+    esp_err_t err = eye_servo_reset_defaults();
+    if (err != ESP_OK) return httpd_resp_send_err(req, HTTPD_500_INTERNAL_SERVER_ERROR, "reset failed");
+
+    cJSON *root = cJSON_CreateObject();
+    cJSON_AddBoolToObject(root, "ok", true);
+    cJSON_AddBoolToObject(root, "saved", false);   /* reboot undoes it; /api/save keeps it */
+    return send_json(req, root);
+}
+
 static esp_err_t save_post(httpd_req_t *req)
 {
     if (eye_motion_save_lid_trim() != ESP_OK ||
@@ -389,6 +440,8 @@ static const httpd_uri_t s_routes[] = {
     { .uri = "/api/limits",   .method = HTTP_POST, .handler = limits_post },
     { .uri = "/api/cfg",      .method = HTTP_POST, .handler = cfg_post },
     { .uri = "/api/save",     .method = HTTP_POST, .handler = save_post },
+    { .uri = "/api/safeboot", .method = HTTP_POST, .handler = safeboot_post },
+    { .uri = "/api/defaults", .method = HTTP_POST, .handler = defaults_post },
     { .uri = "/api/release",  .method = HTTP_POST, .handler = release_post },
     { .uri = "/api/engage",   .method = HTTP_POST, .handler = engage_post },
 };
