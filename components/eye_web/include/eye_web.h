@@ -20,6 +20,9 @@
  *   POST /api/save        commit limits + cfg to NVS
  *   POST /api/release     all servos limp — LATCHES, nothing moves until engage
  *   POST /api/engage      clear the release latch and go to neutral
+ *   POST /mcp             MCP server (Streamable HTTP, 2026-07-28 and 2025-03-26..
+ *                         2025-11-25). Gaze, blink, animations, mode and release;
+ *                         never engage or calibration. See eye_mcp.c.
  */
 #include "esp_err.h"
 
