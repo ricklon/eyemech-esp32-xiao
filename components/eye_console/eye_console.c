@@ -86,6 +86,8 @@ static void cmd_help(void)
     "  !trim <0..1>               lid openness\r\n"
     "  !lids <upper> <lower>      how hard lids track gaze (ref 0.8 0.4)\r\n"
     "  !blinkhold [ms]            how long a blink holds shut (ref 70)\r\n"
+    "  !blinkgap [min max]        seconds between automatic blinks (ref 2 7)\r\n"
+    "  !blinkstyle [both|alternate]  automatic blinks, or winks that alternate eyes\r\n"
     "  !pose <lr> <ud> <l> <r>    one follow pose, each 0..1; eases back after 1 s\r\n"
     "  !pose <lr> <ud> <tl> <bl> <tr> <br>   the same, one value per lid\r\n"
     "  !follow stop               ease out of follow now\r\n"
@@ -124,6 +126,12 @@ static void cmd_status(void)
     printf("lid track : upper %.2f  lower %.2f\r\n",
            (double)eye_motion_get_coeff_upper(), (double)eye_motion_get_coeff_lower());
     printf("blink hold: %d ms\r\n", eye_motion_get_blink_hold_ms());
+    {
+        int gmin, gmax;
+        eye_motion_get_blink_gap_ms(&gmin, &gmax);
+        printf("blink gap : %.1f..%.1f s, %s\r\n", gmin / 1000.0, gmax / 1000.0,
+               eye_motion_blink_style_name(eye_motion_get_blink_style()));
+    }
     printf("free heap : %u bytes\r\n", (unsigned)esp_get_free_heap_size());
     printf("%-5s %-3s %9s %8s %8s %8s %8s %8s\r\n",
            "name", "ch", "angle", "min", "max", "min_us", "max_us", "trim_us");
@@ -421,6 +429,30 @@ static void handle(char *line)
         esp_err_t err = eye_motion_follow_stop();
         printf(err == ESP_OK ? "easing out of follow\r\n" : "not following\r\n");
     }
+    else if (!strcmp(cmd, "blinkgap")) {
+        const char *a = next_tok(&save), *b = next_tok(&save);
+        if (a && b) {
+            esp_err_t err = eye_motion_set_blink_gap_ms((int)(strtof(a, NULL) * 1000),
+                                                        (int)(strtof(b, NULL) * 1000));
+            if (err == ESP_ERR_INVALID_ARG) printf("need 1 <= min <= max <= 60 seconds\r\n");
+            else                            report("blinkgap", err);
+        } else if (a) {
+            printf("usage: !blinkgap <min_s> <max_s>\r\n");
+        }
+        int gmin, gmax;
+        eye_motion_get_blink_gap_ms(&gmin, &gmax);
+        printf("blink gap: %.1f..%.1f s (reference 2..7; !save keeps it)\r\n", gmin / 1000.0, gmax / 1000.0);
+    }
+    else if (!strcmp(cmd, "blinkstyle")) {
+        const char *v = next_tok(&save);
+        if (v) {
+            int st = eye_motion_blink_style_from_name(v);
+            if (st < 0) printf("usage: !blinkstyle both|alternate\r\n");
+            else        report("blinkstyle", eye_motion_set_blink_style((eye_blink_style_t)st));
+        }
+        printf("blink style: %s (reference both; !save keeps it)\r\n",
+               eye_motion_blink_style_name(eye_motion_get_blink_style()));
+    }
     else if (!strcmp(cmd, "blinkhold")) {
         const char *v = next_tok(&save);
         if (v) {
@@ -469,6 +501,8 @@ static void handle(char *line)
         if (err == ESP_OK) err = eye_motion_save_lid_trim();
         if (err == ESP_OK) err = eye_motion_save_lid_coeff();
         if (err == ESP_OK) err = eye_motion_save_blink_hold();
+        if (err == ESP_OK) err = eye_motion_save_blink_gap();
+        if (err == ESP_OK) err = eye_motion_save_blink_style();
         report("save", err);
     }
     else if (!strcmp(cmd, "safeboot")) {

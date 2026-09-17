@@ -19,8 +19,12 @@ extern "C" {
 
 /* Wall-clock blink timing. The original used random.randrange(20000) over loop
  * iterations, which does not survive a different core at a different clock. */
-#define EYE_BLINK_GAP_MIN_MS 2000
+#define EYE_BLINK_GAP_MIN_MS 2000   /* reference defaults; tunable, see below */
 #define EYE_BLINK_GAP_MAX_MS 7000
+
+/* Range the automatic blink gap may be set to. */
+#define EYE_BLINK_GAP_FLOOR_MS   1000
+#define EYE_BLINK_GAP_CEILING_MS 60000
 #define EYE_BLINK_CLOSED_MS  70   /* reference default for the hold; tunable, see below */
 #define EYE_BLINK_OPENING_MS 70
 
@@ -212,6 +216,29 @@ esp_err_t eye_motion_save_lid_coeff(void);
 esp_err_t eye_motion_set_blink_hold_ms(int ms);
 int       eye_motion_get_blink_hold_ms(void);
 esp_err_t eye_motion_save_blink_hold(void);
+
+/* The pause between AUTOMATIC blinks, drawn uniformly from min..max each time.
+ * The reference is 2..7 s. ESP_ERR_INVALID_ARG unless
+ * EYE_BLINK_GAP_FLOOR_MS <= min <= max <= EYE_BLINK_GAP_CEILING_MS. Takes effect
+ * from the next blink. Not persisted until eye_motion_save_blink_gap(). */
+esp_err_t eye_motion_set_blink_gap_ms(int min_ms, int max_ms);
+void      eye_motion_get_blink_gap_ms(int *min_ms, int *max_ms);
+esp_err_t eye_motion_save_blink_gap(void);
+
+/* What an AUTOMATIC blink does. BOTH is the reference: all four lids.
+ * ALTERNATE winks one eye, then the other eye next time, back and forth.
+ * A blink someone asks for — eye_motion_request_blink(), so the page's Blink
+ * button, !blink and the MCP tool — is always BOTH: it was asked for by name. */
+typedef enum {
+    EYE_BLINK_BOTH = 0,
+    EYE_BLINK_ALTERNATE,
+} eye_blink_style_t;
+
+esp_err_t         eye_motion_set_blink_style(eye_blink_style_t style);
+eye_blink_style_t eye_motion_get_blink_style(void);
+const char       *eye_motion_blink_style_name(eye_blink_style_t style);
+int               eye_motion_blink_style_from_name(const char *name);   /* -1 if unknown */
+esp_err_t         eye_motion_save_blink_style(void);
 
 /* Queue one blink; the state machine picks it up on the next tick. */
 esp_err_t eye_motion_request_blink(void);
