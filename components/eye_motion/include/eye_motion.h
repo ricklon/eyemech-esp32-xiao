@@ -48,7 +48,53 @@ typedef enum {
     EYE_MODE_CALIBRATION,   /* everything to 90° for fitting horns and linkages  */
     EYE_MODE_ANIM,          /* playing a named animation; reverts when finished  */
     EYE_MODE_STANDBY,       /* nothing driven, nothing scheduled; safe boot lands here */
+    EYE_MODE_FOLLOW,        /* eased toward live poses from a tracker; see below  */
 } eye_mode_t;
+
+/* --- follow: live poses ---------------------------------------------------
+ *
+ * A pose is where a tracker wants the mechanism now, in the same normalised
+ * units as an animation frame, but every field is required: this copies a
+ * measured face, so there is no NAN-means-couple and the 0.8/0.4 lid tracking
+ * does not apply.
+ *
+ *   lr, ud                          0..1 across the calibrated gaze limits
+ *   lid_tl, lid_bl, lid_tr, lid_br  one per lid servo: 0 closed .. 1 open,
+ *                                   where OPEN is the trimmed open position
+ *                                   (what neutral uses), not the calibrated max
+ *
+ * Four lids, not a pair per eye, because a tracker measures upper and lower
+ * lids separately and a face moves them differently. Senders that only have one
+ * openness per eye set both lids of that eye to it; eye_web accepts that form.
+ * Each lid still stops at its own calibrated closed end, and those ends were
+ * measured with the lids meeting, so both closed is the calibrated closure.
+ *
+ * Left and right are the MECHANISM's: lid_tl is servo TL. Whether a camera
+ * image is mirrored onto it is the sender's decision, made once, there.
+ *
+ * The motion task moves each servo toward the latest pose no faster than the
+ * rates below, so a jumpy tracker cannot slam a servo. When poses stop for
+ * EYE_FOLLOW_TIMEOUT_MS, or eye_motion_follow_stop() is called, it eases to
+ * neutral at the same rates and then returns to the mode it came from, without
+ * the full-speed neutral() a mode change would run. */
+typedef struct {
+    float lr, ud;
+    float lid_tl, lid_bl, lid_tr, lid_br;
+} eye_pose_t;
+
+#define EYE_FOLLOW_TIMEOUT_MS  1000
+#define EYE_FOLLOW_GAZE_DEG_S  300.0f   /* ~1/3 s across the LR range */
+#define EYE_FOLLOW_LID_DEG_S   600.0f   /* about an MG90S's own speed: fast enough to blink */
+
+/* Store a pose and, if not already following, enter follow mode from auto,
+ * manual or tracking. ESP_ERR_INVALID_ARG for a field that is not a number in
+ * 0..1. ESP_ERR_INVALID_STATE while released or in standby, calibration or an
+ * animation: those have to be left deliberately, not by a stream. */
+esp_err_t eye_motion_follow(const eye_pose_t *pose);
+
+/* Ease out of follow now rather than waiting for the timeout.
+ * ESP_ERR_INVALID_STATE when not following. */
+esp_err_t eye_motion_follow_stop(void);
 
 /* --- animations ----------------------------------------------------------
  *
@@ -79,7 +125,8 @@ typedef struct {
 /* Play a named animation `repeat` times, restoring the previous mode when it
  * finishes. A negative `repeat` loops until eye_motion_anim_stop(). Unknown name
  * returns ESP_ERR_NOT_FOUND; ESP_ERR_INVALID_STATE in standby, which has to be
- * left deliberately rather than by way of an animation that returns to it. */
+ * left deliberately rather than by way of an animation that returns to it, and
+ * while following, which an animation would fight. */
 esp_err_t eye_motion_play(const char *name, int repeat);
 
 /* End a loop after the frame in flight, so it settles somewhere deliberate. */
@@ -97,7 +144,9 @@ const char *eye_motion_anim_playing(void);
 
 esp_err_t eye_motion_start(void);
 
-esp_err_t  eye_motion_set_mode(eye_mode_t mode);   /* transitions call neutral() */
+/* Transitions call neutral(). EYE_MODE_FOLLOW is refused with
+ * ESP_ERR_INVALID_ARG: it is entered by sending a pose, which it needs. */
+esp_err_t  eye_motion_set_mode(eye_mode_t mode);
 eye_mode_t eye_motion_get_mode(void);
 const char *eye_motion_mode_name(eye_mode_t mode);
 int         eye_motion_mode_from_name(const char *name);  /* -1 if unknown */

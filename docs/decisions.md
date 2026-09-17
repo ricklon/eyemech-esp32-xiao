@@ -237,3 +237,54 @@ release no position is known, so there is nothing to ramp from.
 
 Would revisit if: a slow first move out of standby turns out to matter enough to
 build — for example ramping each servo from its neutral in turn.
+
+## 2026-09-17 — Follow mode for live poses from a tracker
+
+The sibling eye-tracking project measures a face and wants the mechanism to copy
+it. Follow mode takes a pose — `lr`, `ud` and one value per lid servo (`lid_tl`,
+`lid_bl`, `lid_tr`, `lid_br`), each 0..1 — over a WebSocket (`/ws/pose`), plain
+HTTP (`/api/pose`) or the console (`!pose`).
+
+- **Four lids, with a paired shorthand.** eye-tracking's controller already
+  produces upper and lower openness per eye, with the lower lid moving less until
+  nearly shut, and the mechanism has four servos. `lid_l`/`lid_r` set both lids
+  of an eye together for senders that have one value; mixing the two forms is
+  refused. Each lid stops at its own calibrated closed end, measured with the lids
+  meeting, so both closed is the calibrated closure. Watched on the mechanism
+  2026-09-17: blinks every 3 s through all four lids at the 600°/s lid rate, then
+  all four closed and held for 3 s — both eyes closed, no knock, no stall buzz.
+
+- **Every field is required.** An animation frame can leave a lid NAN to hand it
+  to the 0.8/0.4 gaze coupling; a pose cannot. This copies a measured face, whose
+  lids already do whatever they do, so the coupling does not apply while following.
+- **Lid 1.0 is the trimmed open position**, what neutral uses, not the calibrated
+  maximum. Animation frames use the calibrated range; a tracker's "fully open"
+  should read as this face's normal open, not wider.
+- **Left and right are the mechanism's** (`lid_l` is TL/BL). Mirroring a camera
+  image is the sender's decision, made once, there.
+- **The motion task applies poses, rate-limited**: 300°/s gaze, 600°/s lids. The
+  web task only stores the latest pose under a lock. Nothing else in the firmware
+  limits speed; this does because a tracker's output jumps.
+- **No timer blinks while following**: the sender's lids are the blinks.
+- **Entered without neutral()**, the way animations are, so starting to follow
+  does not jump. Poses are refused while released or in standby, calibration or
+  an animation. Animations and `!mode follow` are refused while following.
+- **One second without a pose eases to neutral at the same rates, then returns**
+  to the previous mode directly — also without the full-speed neutral() a mode
+  change runs. `!follow stop`, `POST /api/follow/stop` or `{"stop":true}` on the
+  socket does the same at once.
+- **The WebSocket refuses a cross-origin browser before the upgrade**, via the
+  pre-handshake callback, for the same reason `/mcp` checks Origin. A browser
+  tracker therefore reaches the board through a local bridge, which it needs
+  anyway: a camera needs HTTPS or localhost, and the board serves plain HTTP.
+
+**A pose sender must set `TCP_NODELAY`.** Tested on the mechanism 2026-09-17: the
+same 30 Hz stream was visibly choppy until `tools/posetest.py` disabled Nagle's
+algorithm, and reasonably smooth after, with no firmware change. Nagle holds each
+small frame back waiting for an ACK, so poses arrive in bunches. Browsers disable
+it for WebSockets; a Python or other native bridge has to do it explicitly.
+
+The rates and timeout are compile-time constants in `eye_motion.h`, chosen, not
+measured. Would revisit if: tracked blinks look sluggish (raise the lid rate), a
+real stream jitters visibly (smoothing belongs in the sender, which has the
+timestamps), or the lid rates need to differ between upper and lower lids.

@@ -74,6 +74,13 @@ def main():
     lk.add_argument("lr", type=float)
     lk.add_argument("ud", type=float)
 
+    po = sub.add_parser("pose", help="one follow pose; eases back to neutral after 1 s")
+    po.add_argument("lr", type=float, help="0.0 .. 1.0")
+    po.add_argument("ud", type=float, help="0.0 .. 1.0")
+    po.add_argument("lids", type=float, nargs="+",
+                    help="two values (left, right eye) or four (TL BL TR BR), each 0.0 .. 1.0")
+    sub.add_parser("follow-stop")
+
     tr = sub.add_parser("trim")
     tr.add_argument("value", type=float, help="0.0 .. 1.0")
 
@@ -102,6 +109,17 @@ def main():
         call(a.host, "/api/mode", {"mode": a.mode})
     elif a.cmd == "look":
         call(a.host, "/api/look", {"lr": a.lr, "ud": a.ud})
+    elif a.cmd == "pose":
+        body = {"lr": a.lr, "ud": a.ud}
+        if len(a.lids) == 2:
+            body.update(lid_l=a.lids[0], lid_r=a.lids[1])
+        elif len(a.lids) == 4:
+            body.update(zip(("lid_tl", "lid_bl", "lid_tr", "lid_br"), a.lids))
+        else:
+            sys.exit("pose takes two lid values or four")
+        call(a.host, "/api/pose", body)
+    elif a.cmd == "follow-stop":
+        call(a.host, "/api/follow/stop", {})
     elif a.cmd == "trim":
         call(a.host, "/api/lid_trim", {"value": a.value})
     elif a.cmd == "servo":

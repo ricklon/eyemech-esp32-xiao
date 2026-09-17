@@ -45,7 +45,7 @@ static eye_mode_t s_mode = EYE_MODE_AUTO;
 static bool       s_blink_requested;
 
 /* Indexed by eye_mode_t. */
-static const char *s_mode_names[] = { "tracking", "auto", "manual", "calibration", "anim", "standby" };
+static const char *s_mode_names[] = { "tracking", "auto", "manual", "calibration", "anim", "standby", "follow" };
 #define MODE_COUNT (int)(sizeof(s_mode_names) / sizeof(s_mode_names[0]))
 
 static inline float clampf(float v, float lo, float hi)
@@ -561,7 +561,7 @@ static void anim_begin_frame(int64_t t)
 esp_err_t eye_motion_play(const char *name, int repeat)
 {
     if (name == NULL) return ESP_ERR_INVALID_ARG;
-    if (s_mode == EYE_MODE_STANDBY) return ESP_ERR_INVALID_STATE;
+    if (s_mode == EYE_MODE_STANDBY || s_mode == EYE_MODE_FOLLOW) return ESP_ERR_INVALID_STATE;
     for (int i = 0; i < ANIM_COUNT; i++) {
         if (strcmp(name, s_anims[i].name) != 0) continue;
 
@@ -617,6 +617,153 @@ esp_err_t eye_motion_anim_stop(void)
     return ESP_OK;
 }
 
+/* ------------------------------------------------------------------ follow */
+
+/* The latest pose and its arrival time are written by web/console tasks and
+ * read by the motion task; the lock keeps the four floats a matched set. */
+static portMUX_TYPE s_pose_lock = portMUX_INITIALIZER_UNLOCKED;
+static eye_pose_t   s_pose;
+static int64_t      s_pose_at;
+static bool         s_follow_stopping;
+static eye_mode_t   s_follow_return = EYE_MODE_AUTO;
+
+/* Motion task only. s_follow_deg is where each servo was last commanded to,
+ * which is what the rate limit steps from. */
+static bool    s_follow_seeded;
+static int64_t s_follow_last_t;
+static float   s_follow_deg[EYE_SERVO_COUNT];
+
+static bool unit(float v) { return isfinite(v) && v >= 0.0f && v <= 1.0f; }
+
+esp_err_t eye_motion_follow(const eye_pose_t *pose)
+{
+    if (pose == NULL || !unit(pose->lr) || !unit(pose->ud) ||
+        !unit(pose->lid_tl) || !unit(pose->lid_bl) ||
+        !unit(pose->lid_tr) || !unit(pose->lid_br)) {
+        return ESP_ERR_INVALID_ARG;
+    }
+    eye_mode_t mode = s_mode;
+    if (eye_servo_is_released() || mode == EYE_MODE_STANDBY ||
+        mode == EYE_MODE_CALIBRATION || mode == EYE_MODE_ANIM) {
+        return ESP_ERR_INVALID_STATE;
+    }
+
+    portENTER_CRITICAL(&s_pose_lock);
+    s_pose = *pose;
+    s_pose_at = now_ms();
+    s_follow_stopping = false;
+    portEXIT_CRITICAL(&s_pose_lock);
+
+    if (mode != EYE_MODE_FOLLOW) {
+        s_follow_return = mode;
+        s_follow_seeded = false;       /* the motion task seeds from what it last wrote */
+        s_blink_requested = false;
+        s_mode = EYE_MODE_FOLLOW;      /* not set_mode(): that would run neutral() and jump */
+        ESP_LOGI(TAG, "following poses (was %s)", eye_motion_mode_name(mode));
+    }
+    return ESP_OK;
+}
+
+esp_err_t eye_motion_follow_stop(void)
+{
+    if (s_mode != EYE_MODE_FOLLOW) return ESP_ERR_INVALID_STATE;
+    portENTER_CRITICAL(&s_pose_lock);
+    s_follow_stopping = true;
+    portEXIT_CRITICAL(&s_pose_lock);
+    return ESP_OK;
+}
+
+/* A lid's position for a pose value: 0 closed, 1 the trimmed open position. */
+static float lid_pose(eye_servo_id_t id, float v)
+{
+    float closed = eye_servo_limits(id).min;
+    return closed + (lid_open(id) - closed) * v;
+}
+
+static void follow_tick(int64_t t)
+{
+    /* A release discards the servos' position memory, and engaging from here
+     * runs neutral(); either way the steps must restart from what was actually
+     * written last, not from where this loop thought it was. */
+    if (eye_servo_is_released()) {
+        s_follow_seeded = false;
+    }
+    if (!s_follow_seeded) {
+        for (int i = 0; i < EYE_SERVO_COUNT; i++) {
+            s_follow_deg[i] = eye_servo_read((eye_servo_id_t)i);   /* NAN if never written */
+        }
+        s_follow_last_t = t;
+        s_follow_seeded = true;
+    }
+
+    eye_pose_t p;
+    int64_t at;
+    bool stopping;
+    portENTER_CRITICAL(&s_pose_lock);
+    p = s_pose;
+    at = s_pose_at;
+    stopping = s_follow_stopping;
+    portEXIT_CRITICAL(&s_pose_lock);
+    bool leaving = stopping || (t - at) > EYE_FOLLOW_TIMEOUT_MS;
+
+    float target[EYE_SERVO_COUNT];
+    if (leaving) {
+        /* Exactly what neutral() writes, reached at the follow rates instead. */
+        target[EYE_LR] = clamp_to_limits(EYE_LR, 90.0f);
+        target[EYE_UD] = clamp_to_limits(EYE_UD, 90.0f);
+        target[EYE_TL] = lid_open(EYE_TL);
+        target[EYE_BL] = lid_open(EYE_BL);
+        target[EYE_TR] = lid_open(EYE_TR);
+        target[EYE_BR] = lid_open(EYE_BR);
+    } else {
+        target[EYE_LR] = clamp_to_limits(EYE_LR, denorm(EYE_LR, p.lr));
+        target[EYE_UD] = clamp_to_limits(EYE_UD, denorm(EYE_UD, p.ud));
+        target[EYE_TL] = lid_pose(EYE_TL, p.lid_tl);
+        target[EYE_BL] = lid_pose(EYE_BL, p.lid_bl);
+        target[EYE_TR] = lid_pose(EYE_TR, p.lid_tr);
+        target[EYE_BR] = lid_pose(EYE_BR, p.lid_br);
+    }
+
+    float dt = (float)(t - s_follow_last_t) / 1000.0f;
+    s_follow_last_t = t;
+    if (dt < 0.0f)  dt = 0.0f;
+    if (dt > 0.05f) dt = 0.05f;   /* a stalled tick must not become one big step */
+
+    bool settled = true;
+    for (int i = 0; i < EYE_SERVO_COUNT; i++) {
+        float rate = (i == EYE_LR || i == EYE_UD) ? EYE_FOLLOW_GAZE_DEG_S : EYE_FOLLOW_LID_DEG_S;
+        float step = rate * dt;
+        float cur  = s_follow_deg[i];
+        float next;
+        if (isnan(cur)) {
+            next = target[i];   /* never written: there is nothing to step from */
+        } else {
+            float d = target[i] - cur;
+            next = (fabsf(d) <= step) ? target[i] : cur + copysignf(step, d);
+        }
+        s_follow_deg[i] = next;
+        if (fabsf(target[i] - next) > 0.01f) settled = false;
+        eye_servo_write((eye_servo_id_t)i, next);
+    }
+
+    /* Keep the tracked targets coherent, so get_state reports where it is and
+     * a blink after leaving reopens to here rather than to a stale position. */
+    s_x_target  = s_follow_deg[EYE_LR];
+    s_y_target  = s_follow_deg[EYE_UD];
+    s_tl_target = s_follow_deg[EYE_TL];
+    s_bl_target = s_follow_deg[EYE_BL];
+    s_tr_target = s_follow_deg[EYE_TR];
+    s_br_target = s_follow_deg[EYE_BR];
+
+    if (leaving && settled) {
+        s_blink_requested = false;
+        s_settle_until = t + EYE_ANIM_SETTLE_MS;
+        s_mode = s_follow_return;   /* already at neutral: no set_mode() jump */
+        ESP_LOGI(TAG, "follow %s — back to %s", stopping ? "stopped" : "timed out",
+                 eye_motion_mode_name(s_follow_return));
+    }
+}
+
 /* One tick of the player. Returns false when the sequence is done. */
 static bool anim_tick(int64_t t)
 {
@@ -669,6 +816,7 @@ eye_mode_t eye_motion_get_mode(void) { return s_mode; }
 
 esp_err_t eye_motion_set_mode(eye_mode_t mode)
 {
+    if (mode == EYE_MODE_FOLLOW) return ESP_ERR_INVALID_ARG;
     if (mode == s_mode) return ESP_OK;
     eye_mode_t from = s_mode;
     s_mode = mode;
@@ -711,8 +859,9 @@ static void motion_task(void *arg)
 
         /* Blink runs in every mode except calibration, where the whole point is
          * that nothing moves off 90°. */
+        /* Not while following either: the sender's lids are the blinks. */
         if (s_mode != EYE_MODE_CALIBRATION && s_mode != EYE_MODE_ANIM &&
-            s_mode != EYE_MODE_STANDBY &&
+            s_mode != EYE_MODE_STANDBY && s_mode != EYE_MODE_FOLLOW &&
             t >= s_settle_until) {
             if (blink_phase == BLINK_IDLE && (s_blink_requested || t >= next_blink_at)) {
                 s_blink_requested = false;
@@ -796,6 +945,10 @@ static void motion_task(void *arg)
 
         case EYE_MODE_STANDBY:
             /* Nothing, and no blinks: see the blink gate above. */
+            break;
+
+        case EYE_MODE_FOLLOW:
+            follow_tick(t);
             break;
         }
 

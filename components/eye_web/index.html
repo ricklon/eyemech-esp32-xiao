@@ -129,6 +129,7 @@
 
 <fieldset>
   <legend>Servos</legend>
+  <p class="warn" id="follownote" hidden>Following a live pose stream. It eases back to neutral and the previous mode one second after poses stop. <button id="followstop">Stop following</button></p>
   <p class="warn" id="sbynote" hidden>Standby: nothing is driven and nothing is scheduled, blinks included. Safe boot starts here. Picking Auto, Manual or Tracking moves every servo to neutral at full speed.</p>
   <p class="warn" id="calnote" hidden>Calibration mode: angle fields write directly to the servo. Small steps.</p>
   <p class="warn">Min µs and Max µs are the pulse range the servo is driven with, not
@@ -205,6 +206,7 @@ document.querySelectorAll('#modes button').forEach(b =>
   b.onclick = () => post('/api/mode', { mode: b.dataset.mode }).then(refresh));
 document.getElementById('blink').onclick   = () => post('/api/blink');
 document.getElementById('release').onclick = () => post('/api/release');
+document.getElementById('followstop').onclick = () => post('/api/follow/stop').then(refresh);
 document.getElementById('engage').onclick  = () => post('/api/engage');
 document.getElementById('save').onclick    = () => post('/api/save').then(refresh);
 document.getElementById('center').onclick  = () => { lr = ud = 90; drawPad(); post('/api/look', { lr, ud }); };
@@ -359,6 +361,7 @@ async function refresh() {
       b.setAttribute('aria-pressed', b.dataset.mode === state.mode));
     document.getElementById('calnote').hidden = state.mode !== 'calibration';
     document.getElementById('sbynote').hidden = state.mode !== 'standby';
+    document.getElementById('follownote').hidden = state.mode !== 'follow';
     jogBox.hidden = state.mode !== 'calibration';   /* the API refuses anyway */
     fillJogServos();
     const sb = document.getElementById('safeboot');
