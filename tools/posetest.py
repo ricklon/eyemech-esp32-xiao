@@ -83,6 +83,8 @@ def main():
     p.add_argument("--period", type=float, default=4.0, help="seconds per figure")
     p.add_argument("--blink-every", type=float, default=0.0,
                    help="seconds between blinks sent as lid values; 0 for none")
+    p.add_argument("--paired", action="store_true",
+                   help="send lid_l/lid_r instead of the four lids")
     a = p.parse_args()
     amp = max(0.0, min(0.5, a.amplitude))
 
@@ -92,11 +94,16 @@ def main():
     try:
         while (t := time.monotonic() - t0) < a.seconds:
             phase = 2 * math.pi * t / a.period
-            lids = 1.0
+            upper = 1.0
             if a.blink_every > 0 and (t % a.blink_every) < 0.15:
-                lids = 0.0
-            pose = {"lr": 0.5 + amp * math.sin(phase), "ud": 0.5 + amp * math.sin(2 * phase) / 2,
-                    "lid_l": lids, "lid_r": lids}
+                upper = 0.0
+            pose = {"lr": 0.5 + amp * math.sin(phase), "ud": 0.5 + amp * math.sin(2 * phase) / 2}
+            if a.paired:
+                pose.update(lid_l=upper, lid_r=upper)
+            else:
+                # eye-tracking's controller moves the lower lid less until nearly shut.
+                lower = math.sqrt(upper)
+                pose.update(lid_tl=upper, lid_bl=lower, lid_tr=upper, lid_br=lower)
             ws_send_text(s, json.dumps(pose))
             ws_drain(s)
             time.sleep(1.0 / a.rate)

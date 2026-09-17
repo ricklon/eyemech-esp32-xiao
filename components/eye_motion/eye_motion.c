@@ -638,7 +638,8 @@ static bool unit(float v) { return isfinite(v) && v >= 0.0f && v <= 1.0f; }
 esp_err_t eye_motion_follow(const eye_pose_t *pose)
 {
     if (pose == NULL || !unit(pose->lr) || !unit(pose->ud) ||
-        !unit(pose->lid_l) || !unit(pose->lid_r)) {
+        !unit(pose->lid_tl) || !unit(pose->lid_bl) ||
+        !unit(pose->lid_tr) || !unit(pose->lid_br)) {
         return ESP_ERR_INVALID_ARG;
     }
     eye_mode_t mode = s_mode;
@@ -717,10 +718,10 @@ static void follow_tick(int64_t t)
     } else {
         target[EYE_LR] = clamp_to_limits(EYE_LR, denorm(EYE_LR, p.lr));
         target[EYE_UD] = clamp_to_limits(EYE_UD, denorm(EYE_UD, p.ud));
-        target[EYE_TL] = lid_pose(EYE_TL, p.lid_l);
-        target[EYE_BL] = lid_pose(EYE_BL, p.lid_l);
-        target[EYE_TR] = lid_pose(EYE_TR, p.lid_r);
-        target[EYE_BR] = lid_pose(EYE_BR, p.lid_r);
+        target[EYE_TL] = lid_pose(EYE_TL, p.lid_tl);
+        target[EYE_BL] = lid_pose(EYE_BL, p.lid_bl);
+        target[EYE_TR] = lid_pose(EYE_TR, p.lid_tr);
+        target[EYE_BR] = lid_pose(EYE_BR, p.lid_br);
     }
 
     float dt = (float)(t - s_follow_last_t) / 1000.0f;

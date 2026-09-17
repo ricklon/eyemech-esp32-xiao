@@ -451,22 +451,39 @@ static esp_err_t engage_post(httpd_req_t *req)
 
 /* ------------------------------------------------------------------ poses */
 
-/* All four fields required, each a number; eye_motion_follow() checks ranges. */
+static bool json_num(const cJSON *o, const char *key, float *out)
+{
+    const cJSON *v = cJSON_GetObjectItemCaseSensitive(o, key);
+    if (!cJSON_IsNumber(v)) return false;
+    *out = (float)v->valuedouble;
+    return true;
+}
+
+/* lr and ud, plus EITHER lid_l and lid_r (both lids of an eye together) OR all
+ * four of lid_tl, lid_bl, lid_tr, lid_br. Any of the four present means the
+ * four-lid form, so a sender mixing the two is refused rather than guessed at.
+ * eye_motion_follow() checks the ranges. */
 static bool pose_from_json(const cJSON *o, eye_pose_t *p)
 {
-    const char *keys[] = { "lr", "ud", "lid_l", "lid_r" };
-    float *dst[] = { &p->lr, &p->ud, &p->lid_l, &p->lid_r };
-    for (int i = 0; i < 4; i++) {
-        const cJSON *v = cJSON_GetObjectItemCaseSensitive(o, keys[i]);
-        if (!cJSON_IsNumber(v)) return false;
-        *dst[i] = (float)v->valuedouble;
+    if (!json_num(o, "lr", &p->lr) || !json_num(o, "ud", &p->ud)) return false;
+
+    bool four = cJSON_HasObjectItem(o, "lid_tl") || cJSON_HasObjectItem(o, "lid_bl") ||
+                cJSON_HasObjectItem(o, "lid_tr") || cJSON_HasObjectItem(o, "lid_br");
+    if (four) {
+        if (cJSON_HasObjectItem(o, "lid_l") || cJSON_HasObjectItem(o, "lid_r")) return false;
+        return json_num(o, "lid_tl", &p->lid_tl) && json_num(o, "lid_bl", &p->lid_bl) &&
+               json_num(o, "lid_tr", &p->lid_tr) && json_num(o, "lid_br", &p->lid_br);
     }
+    float l, r;
+    if (!json_num(o, "lid_l", &l) || !json_num(o, "lid_r", &r)) return false;
+    p->lid_tl = p->lid_bl = l;
+    p->lid_tr = p->lid_br = r;
     return true;
 }
 
 static const char *follow_error(esp_err_t err)
 {
-    if (err == ESP_ERR_INVALID_ARG)   return "lr, ud, lid_l and lid_r are required, each 0..1";
+    if (err == ESP_ERR_INVALID_ARG)   return "need lr, ud and either lid_l+lid_r or lid_tl+lid_bl+lid_tr+lid_br, each 0..1";
     if (err == ESP_ERR_INVALID_STATE) return "not accepting poses: released, or in standby, calibration or an animation";
     return "pose refused";
 }

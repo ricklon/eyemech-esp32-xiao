@@ -58,11 +58,18 @@ typedef enum {
  * measured face, so there is no NAN-means-couple and the 0.8/0.4 lid tracking
  * does not apply.
  *
- *   lr, ud        0..1 across the calibrated gaze limits
- *   lid_l, lid_r  0 closed .. 1 open, where OPEN is the trimmed open position
- *                 (what neutral uses), not the calibrated maximum
+ *   lr, ud                          0..1 across the calibrated gaze limits
+ *   lid_tl, lid_bl, lid_tr, lid_br  one per lid servo: 0 closed .. 1 open,
+ *                                   where OPEN is the trimmed open position
+ *                                   (what neutral uses), not the calibrated max
  *
- * Left and right are the MECHANISM's: lid_l drives TL and BL. Whether a camera
+ * Four lids, not a pair per eye, because a tracker measures upper and lower
+ * lids separately and a face moves them differently. Senders that only have one
+ * openness per eye set both lids of that eye to it; eye_web accepts that form.
+ * Each lid still stops at its own calibrated closed end, and those ends were
+ * measured with the lids meeting, so both closed is the calibrated closure.
+ *
+ * Left and right are the MECHANISM's: lid_tl is servo TL. Whether a camera
  * image is mirrored onto it is the sender's decision, made once, there.
  *
  * The motion task moves each servo toward the latest pose no faster than the
@@ -71,7 +78,8 @@ typedef enum {
  * neutral at the same rates and then returns to the mode it came from, without
  * the full-speed neutral() a mode change would run. */
 typedef struct {
-    float lr, ud, lid_l, lid_r;
+    float lr, ud;
+    float lid_tl, lid_bl, lid_tr, lid_br;
 } eye_pose_t;
 
 #define EYE_FOLLOW_TIMEOUT_MS  1000

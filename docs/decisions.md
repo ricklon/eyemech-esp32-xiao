@@ -241,8 +241,17 @@ build — for example ramping each servo from its neutral in turn.
 ## 2026-09-17 — Follow mode for live poses from a tracker
 
 The sibling eye-tracking project measures a face and wants the mechanism to copy
-it. Follow mode takes a pose — `lr`, `ud`, `lid_l`, `lid_r`, each 0..1 — over a
-WebSocket (`/ws/pose`), plain HTTP (`/api/pose`) or the console (`!pose`).
+it. Follow mode takes a pose — `lr`, `ud` and one value per lid servo (`lid_tl`,
+`lid_bl`, `lid_tr`, `lid_br`), each 0..1 — over a WebSocket (`/ws/pose`), plain
+HTTP (`/api/pose`) or the console (`!pose`).
+
+- **Four lids, with a paired shorthand.** eye-tracking's controller already
+  produces upper and lower openness per eye, with the lower lid moving less until
+  nearly shut, and the mechanism has four servos. `lid_l`/`lid_r` set both lids
+  of an eye together for senders that have one value; mixing the two forms is
+  refused. Each lid stops at its own calibrated closed end, measured with the lids
+  meeting, so both closed is the calibrated closure — still worth one watched test
+  of an upper and lower lid closing together at speed.
 
 - **Every field is required.** An animation frame can leave a lid NAN to hand it
   to the 0.8/0.4 gaze coupling; a pose cannot. This copies a measured face, whose
@@ -271,5 +280,4 @@ WebSocket (`/ws/pose`), plain HTTP (`/api/pose`) or the console (`!pose`).
 The rates and timeout are compile-time constants in `eye_motion.h`, chosen, not
 measured. Would revisit if: tracked blinks look sluggish (raise the lid rate), a
 real stream jitters visibly (smoothing belongs in the sender, which has the
-timestamps), or independent upper and lower lids are wanted, which needs a
-six-value pose.
+timestamps), or the lid rates need to differ between upper and lower lids.

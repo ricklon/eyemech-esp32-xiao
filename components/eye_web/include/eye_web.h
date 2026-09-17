@@ -21,7 +21,8 @@
  *   POST /api/save        commit limits + cfg to NVS
  *   POST /api/release     all servos limp — LATCHES, nothing moves until engage
  *   POST /api/engage      clear the release latch and go to neutral
- *   POST /api/pose        {"lr","ud","lid_l","lid_r"}, each 0..1 — enters follow
+ *   POST /api/pose        {"lr","ud"} + {"lid_l","lid_r"} or {"lid_tl","lid_bl","lid_tr","lid_br"},
+ *                         each 0..1 — enters follow
  *   POST /api/follow/stop ease to neutral and return to the previous mode
  *   GET  /ws/pose         WebSocket: a pose per text frame, or {"stop":true}
  *   POST /mcp             MCP server (Streamable HTTP, 2026-07-28 and 2025-03-26..

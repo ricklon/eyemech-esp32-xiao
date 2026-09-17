@@ -86,7 +86,8 @@ static void cmd_help(void)
     "  !trim <0..1>               lid openness\r\n"
     "  !lids <upper> <lower>      how hard lids track gaze (ref 0.8 0.4)\r\n"
     "  !blinkhold [ms]            how long a blink holds shut (ref 70)\r\n"
-    "  !pose <lr> <ud> <ll> <rl>  one follow pose, each 0..1; eases back after 1 s\r\n"
+    "  !pose <lr> <ud> <l> <r>    one follow pose, each 0..1; eases back after 1 s\r\n"
+    "  !pose <lr> <ud> <tl> <bl> <tr> <br>   the same, one value per lid\r\n"
     "  !follow stop               ease out of follow now\r\n"
     "  !look <lr> <ud>            manual gaze, degrees\r\n"
     "  !anim <name> [n|loop]      play an animation, n times or forever\r\n"
@@ -394,10 +395,21 @@ static void handle(char *line)
                (double)eye_motion_get_coeff_lower());
     }
     else if (!strcmp(cmd, "pose")) {
-        const char *v[4];
-        for (int i = 0; i < 4; i++) v[i] = next_tok(&save);
-        if (!v[3]) { printf("usage: !pose <lr> <ud> <lid_l> <lid_r>   each 0..1\r\n"); return; }
-        eye_pose_t p = { strtof(v[0], NULL), strtof(v[1], NULL), strtof(v[2], NULL), strtof(v[3], NULL) };
+        const char *v[6];
+        for (int i = 0; i < 6; i++) v[i] = next_tok(&save);
+        if (!v[3] || (v[4] && !v[5])) {
+            printf("usage: !pose <lr> <ud> <l> <r>  or  !pose <lr> <ud> <tl> <bl> <tr> <br>   each 0..1\r\n");
+            return;
+        }
+        float f[6];
+        for (int i = 0; i < 6; i++) f[i] = v[i] ? strtof(v[i], NULL) : 0.0f;
+        eye_pose_t p = { .lr = f[0], .ud = f[1] };
+        if (v[5]) {
+            p.lid_tl = f[2]; p.lid_bl = f[3]; p.lid_tr = f[4]; p.lid_br = f[5];
+        } else {
+            p.lid_tl = p.lid_bl = f[2];
+            p.lid_tr = p.lid_br = f[3];
+        }
         esp_err_t err = eye_motion_follow(&p);
         if (err == ESP_ERR_INVALID_ARG)        printf("each value must be 0..1\r\n");
         else if (err == ESP_ERR_INVALID_STATE) printf("not accepting poses: released, or in standby, calibration or an animation\r\n");
