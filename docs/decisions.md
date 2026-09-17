@@ -250,8 +250,9 @@ HTTP (`/api/pose`) or the console (`!pose`).
   nearly shut, and the mechanism has four servos. `lid_l`/`lid_r` set both lids
   of an eye together for senders that have one value; mixing the two forms is
   refused. Each lid stops at its own calibrated closed end, measured with the lids
-  meeting, so both closed is the calibrated closure — still worth one watched test
-  of an upper and lower lid closing together at speed.
+  meeting, so both closed is the calibrated closure. Watched on the mechanism
+  2026-09-17: blinks every 3 s through all four lids at the 600°/s lid rate, then
+  all four closed and held for 3 s — both eyes closed, no knock, no stall buzz.
 
 - **Every field is required.** An animation frame can leave a lid NAN to hand it
   to the 0.8/0.4 gaze coupling; a pose cannot. This copies a measured face, whose
