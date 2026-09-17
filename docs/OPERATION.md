@@ -10,14 +10,17 @@ USB/3V3 while the servos run off a separate rail.
 
 1. **Logic first.** USB to the XIAO. The board boots, brings up I²C, WiFi and the
    console. With `safeboot on` it comes up **released** — every channel off,
-   mode `calibration`, nothing driven.
+   mode `standby`, nothing driven.
 2. **Check it came up clean.** `!status` over the serial console at 115200, or
    watch the boot log. Expect `pca9685: ready at 0x40`.
 3. **Servo rail second.** Nothing should move — not a twitch. If anything does,
    the outputs are not gated and something is wrong; kill it.
-4. **`!engage`** when you actually want it live. Outside calibration mode this
-   also drives to neutral, which *is* a movement.
-5. **`!mode auto`** (or `tracking` with a Grove Vision module attached).
+4. **`!engage`** when you actually want it live. In `standby` or `calibration`
+   this drives nothing; in any other mode it drives to neutral, which *is* a
+   movement.
+5. **`!mode auto`** (or `tracking` with a Grove Vision module attached). Leaving
+   standby drives every servo to neutral at full speed: after a release there is
+   no known position to ease from.
 
 Once every axis is calibrated, `!safeboot off` makes it come up running instead,
 which is what you want for a demo. Turn it back on before any mechanical work.
@@ -41,9 +44,10 @@ switch does not. Treat the switch as the real e-stop.
 | `tracking` | Follows the Grove Vision module; blinks on a wall-clock timer |
 | `auto` | Random gaze and blink. The default with no vision module |
 | `manual` | `!look <lr> <ud>` or the web page drives the gaze |
-| `calibration` | Everything to 90 once on entry, then **nothing per tick** — direct writes stick. The only mode where `!servo` / `!jog` / `!mark` are accepted |
+| `calibration` | Everything to 90 once on entry, then **nothing per tick** — direct writes stick. The only mode where `!servo` / `!jog` / `!mark` are accepted. Entered from `standby` it seeds nothing, so axes still come up one at a time |
+| `standby` | Stopped: nothing driven on entry, nothing per tick, no blinks, no animations, and the MCP motion tools refuse. Where safe boot lands. Leaving it takes a person |
 
-Every mode change runs `neutral()` and clears a half-finished blink.
+Every other mode change runs `neutral()` and clears a half-finished blink.
 
 ## Console
 
@@ -53,7 +57,7 @@ why it exists — WiFi is not a dependency for stopping the mechanism.
 ```
 !status                 mode, release latch, vision, trim, heap, servo table
 !release / !engage      stop (latched), and the way back
-!mode <name>            tracking | auto | manual | calibration
+!mode <name>            tracking | auto | manual | calibration | standby
 !blink                  queue one blink
 !trim <0..1>            lid openness, scaled within the calibrated limits
 !look <lr> <ud>         manual gaze in degrees

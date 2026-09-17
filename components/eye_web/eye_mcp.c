@@ -41,7 +41,7 @@ static const char *const s_instructions =
     "measurement. Gaze is 0..1 across each axis's calibrated range; which physical "
     "direction 0 means depends on how the servo is mounted, so check with a person "
     "before relying on left/right or up/down. Motion tools are refused while the "
-    "servos are released or the mechanism is in calibration mode, and only a person "
+    "servos are released or the mechanism is in standby or calibration mode, and only a person "
     "at the control page or serial console can change either. release is the "
     "software stop: it latches, and this server cannot undo it.";
 
@@ -148,6 +148,10 @@ static const char *motion_refusal(void)
         return "The servos are released (a latched stop). Nothing moves until a person "
                "engages them from the control page or serial console; this server "
                "cannot engage.";
+    }
+    if (eye_motion_get_mode() == EYE_MODE_STANDBY) {
+        return "The mechanism is in standby: stopped, with nothing scheduled. A person has "
+               "to pick a mode at the control page or serial console before it moves.";
     }
     if (eye_motion_get_mode() == EYE_MODE_CALIBRATION) {
         return "The mechanism is in calibration mode, which is for a person fitting horns "
@@ -385,8 +389,22 @@ static cJSON *anim_schema(void)
     cJSON *name = cJSON_CreateObject();
     cJSON_AddStringToObject(name, "type", "string");
     cJSON *names = cJSON_AddArrayToObject(name, "enum");
+    /* One "name: what it looks like" line per animation, from the same table the
+     * control page labels its buttons with, so a model can choose by effect. */
+    size_t len = 1;
     for (const char *const *a = eye_motion_anim_names(); *a; a++) {
         cJSON_AddItemToArray(names, cJSON_CreateString(*a));
+        len += strlen(*a) + strlen(eye_motion_anim_desc(*a)) + 3;
+    }
+    char *desc = malloc(len);
+    if (desc) {
+        size_t o = 0;
+        for (const char *const *a = eye_motion_anim_names(); *a; a++) {
+            o += (size_t)snprintf(desc + o, len - o, "%s%s: %s", o ? "\n" : "", *a,
+                                  eye_motion_anim_desc(*a));
+        }
+        cJSON_AddStringToObject(name, "description", desc);
+        free(desc);
     }
     add_prop(s, "name", name);
     cJSON *rep = cJSON_CreateObject();
@@ -424,20 +442,20 @@ static const tool_t s_tools[] = {
       "calibrated limits. Positions are commanded, not measured: there is no feedback.",
       true, false, true, empty_schema, call_get_state },
     { "look", "Look",
-      "Point the eyes. Switches to manual mode. Refused while released or in calibration mode.",
+      "Point the eyes. Switches to manual mode. Refused while released, in standby or in calibration mode.",
       false, false, true, look_schema, call_look },
-    { "blink", "Blink", "Blink once. Refused while released or in calibration mode.",
+    { "blink", "Blink", "Blink once. Refused while released, in standby or in calibration mode.",
       false, false, false, empty_schema, call_blink },
     { "play_animation", "Play animation",
       "Play a built-in expression; the previous mode resumes when it ends. Refused while "
-      "released or in calibration mode.",
+      "released, in standby or in calibration mode.",
       false, false, false, anim_schema, call_play_animation },
     { "stop_animation", "Stop animation",
       "End the playing animation after the frame in flight. Safe to call when nothing is playing.",
       false, false, true, empty_schema, call_stop_animation },
     { "set_mode", "Set mode",
-      "Switch between auto, manual and tracking. Calibration mode is not available here. "
-      "Refused while released or in calibration mode.",
+      "Switch between auto, manual and tracking. Standby and calibration are not available "
+      "here, and it is refused while released, in standby or in calibration mode.",
       false, false, true, mode_schema, call_set_mode },
     { "release", "Release servos",
       "Software stop: every servo goes limp and stays limp until a person engages them "

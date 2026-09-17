@@ -47,6 +47,7 @@ typedef enum {
     EYE_MODE_MANUAL,        /* eye_web is driving                                */
     EYE_MODE_CALIBRATION,   /* everything to 90° for fitting horns and linkages  */
     EYE_MODE_ANIM,          /* playing a named animation; reverts when finished  */
+    EYE_MODE_STANDBY,       /* nothing driven, nothing scheduled; safe boot lands here */
 } eye_mode_t;
 
 /* --- animations ----------------------------------------------------------
@@ -77,7 +78,8 @@ typedef struct {
 
 /* Play a named animation `repeat` times, restoring the previous mode when it
  * finishes. A negative `repeat` loops until eye_motion_anim_stop(). Unknown name
- * returns ESP_ERR_NOT_FOUND. */
+ * returns ESP_ERR_NOT_FOUND; ESP_ERR_INVALID_STATE in standby, which has to be
+ * left deliberately rather than by way of an animation that returns to it. */
 esp_err_t eye_motion_play(const char *name, int repeat);
 
 /* End a loop after the frame in flight, so it settles somewhere deliberate. */

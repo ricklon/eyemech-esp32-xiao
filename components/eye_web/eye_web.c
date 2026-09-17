@@ -230,6 +230,7 @@ static esp_err_t anim_post(httpd_req_t *req)
     esp_err_t err = cJSON_IsString(n) ? eye_motion_play(n->valuestring, repeat)
                                       : ESP_ERR_INVALID_ARG;
     cJSON_Delete(body);
+    if (err == ESP_ERR_INVALID_STATE) return send_409(req, "in standby — pick a mode first");
     if (err != ESP_OK) {
         return httpd_resp_send_err(req, HTTPD_400_BAD_REQUEST, "unknown animation");
     }

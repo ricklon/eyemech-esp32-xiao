@@ -212,3 +212,28 @@ check stops a web page in a browser from driving it, and that is all.
 Would revisit if: the board leaves a trusted LAN (add auth first), or a client
 needs change notifications (`subscriptions/listen`), which means holding a
 socket open.
+
+## 2026-09-17 — A standby mode, separate from calibration
+
+Safe boot used to land in `calibration` because it was the only mode whose loop
+drives nothing. That made one label mean two things — "stopped, waiting for a
+person" and "fitting horns and measuring limits" — and after calibration was
+finished the board still announced itself as calibrating on every reboot.
+
+`standby` is the stopped state: nothing driven on entry, nothing per tick, no
+blinks, animations refused, and the MCP motion tools refuse. Safe boot lands
+there. `!engage` in standby drives nothing, as it does in calibration.
+The MicroPython original has no such mode. Its enable switch did not stop
+anything: it selected pot control ("controller"), and the mode switch forced
+calibration, so the closest it had to stopped was calibration too.
+
+Entering calibration from standby seeds nothing, where from a running mode it
+still drives all six to 90. Without that, engaging in standby and then choosing
+calibration would move every servo at once, which is the one thing calibration's
+one-axis-at-a-time procedure exists to prevent.
+
+Leaving standby for a running mode drives to neutral at full speed. After a
+release no position is known, so there is nothing to ramp from.
+
+Would revisit if: a slow first move out of standby turns out to matter enough to
+build — for example ramping each servo from its neutral in turn.
