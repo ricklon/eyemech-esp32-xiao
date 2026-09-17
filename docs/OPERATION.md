@@ -46,6 +46,7 @@ switch does not. Treat the switch as the real e-stop.
 | `manual` | `!look <lr> <ud>` or the web page drives the gaze |
 | `calibration` | Everything to 90 once on entry, then **nothing per tick** — direct writes stick. The only mode where `!servo` / `!jog` / `!mark` are accepted. Entered from `standby` it seeds nothing, so axes still come up one at a time |
 | `standby` | Stopped: nothing driven on entry, nothing per tick, no blinks, no animations, and the MCP motion tools refuse. Where safe boot lands. Leaving it takes a person |
+| `follow` | Eases toward live poses from `/ws/pose`, `POST /api/pose` or `!pose`, at most 300°/s for gaze and 600°/s for lids. No timer blinks. Entered by sending a pose (from auto, manual or tracking), not by `!mode`. One second without a pose, or `!follow stop`, eases back to neutral and returns to the previous mode |
 
 Every other mode change runs `neutral()` and clears a half-finished blink.
 

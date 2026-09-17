@@ -9,6 +9,7 @@
 
 #include <stdlib.h>
 #include <string.h>
+#include <strings.h>
 #include "cJSON.h"
 #include "esp_check.h"
 #include "esp_http_server.h"
@@ -153,7 +154,9 @@ static esp_err_t mode_post(httpd_req_t *req)
     int mode = cJSON_IsString(m) ? eye_motion_mode_from_name(m->valuestring) : -1;
     cJSON_Delete(body);
     if (mode < 0) return httpd_resp_send_err(req, HTTPD_400_BAD_REQUEST, "unknown mode");
-    eye_motion_set_mode((eye_mode_t)mode);
+    if (eye_motion_set_mode((eye_mode_t)mode) != ESP_OK) {
+        return httpd_resp_send_err(req, HTTPD_400_BAD_REQUEST, "follow is entered by sending a pose");
+    }
     return send_ok(req);
 }
 
@@ -230,7 +233,7 @@ static esp_err_t anim_post(httpd_req_t *req)
     esp_err_t err = cJSON_IsString(n) ? eye_motion_play(n->valuestring, repeat)
                                       : ESP_ERR_INVALID_ARG;
     cJSON_Delete(body);
-    if (err == ESP_ERR_INVALID_STATE) return send_409(req, "in standby — pick a mode first");
+    if (err == ESP_ERR_INVALID_STATE) return send_409(req, "not while in standby or following");
     if (err != ESP_OK) {
         return httpd_resp_send_err(req, HTTPD_400_BAD_REQUEST, "unknown animation");
     }
@@ -446,6 +449,120 @@ static esp_err_t engage_post(httpd_req_t *req)
     return send_ok(req);
 }
 
+/* ------------------------------------------------------------------ poses */
+
+/* All four fields required, each a number; eye_motion_follow() checks ranges. */
+static bool pose_from_json(const cJSON *o, eye_pose_t *p)
+{
+    const char *keys[] = { "lr", "ud", "lid_l", "lid_r" };
+    float *dst[] = { &p->lr, &p->ud, &p->lid_l, &p->lid_r };
+    for (int i = 0; i < 4; i++) {
+        const cJSON *v = cJSON_GetObjectItemCaseSensitive(o, keys[i]);
+        if (!cJSON_IsNumber(v)) return false;
+        *dst[i] = (float)v->valuedouble;
+    }
+    return true;
+}
+
+static const char *follow_error(esp_err_t err)
+{
+    if (err == ESP_ERR_INVALID_ARG)   return "lr, ud, lid_l and lid_r are required, each 0..1";
+    if (err == ESP_ERR_INVALID_STATE) return "not accepting poses: released, or in standby, calibration or an animation";
+    return "pose refused";
+}
+
+/* One pose over plain HTTP: for testing and for senders that cannot hold a
+ * WebSocket. Follow times out after EYE_FOLLOW_TIMEOUT_MS unless more arrive. */
+static esp_err_t pose_post(httpd_req_t *req)
+{
+    cJSON *body = NULL;
+    if (read_json(req, &body) != ESP_OK) {
+        return httpd_resp_send_err(req, HTTPD_400_BAD_REQUEST, "bad json");
+    }
+    eye_pose_t p;
+    esp_err_t err = pose_from_json(body, &p) ? eye_motion_follow(&p) : ESP_ERR_INVALID_ARG;
+    cJSON_Delete(body);
+    if (err == ESP_ERR_INVALID_STATE) return send_409(req, follow_error(err));
+    if (err != ESP_OK) return httpd_resp_send_err(req, HTTPD_400_BAD_REQUEST, follow_error(err));
+    return send_ok(req);
+}
+
+static esp_err_t follow_stop_post(httpd_req_t *req)
+{
+    if (eye_motion_follow_stop() != ESP_OK) return send_409(req, "not following");
+    return send_ok(req);
+}
+
+/* A browser on another origin must not get a socket that drives servos: same
+ * rule, and the same reason, as /mcp. Runs before the upgrade is answered. */
+static esp_err_t ws_origin_check(httpd_req_t *req)
+{
+    size_t olen = httpd_req_get_hdr_value_len(req, "Origin");
+    if (olen == 0) return ESP_OK;
+    char origin[128], host[96];
+    if (olen >= sizeof(origin) ||
+        httpd_req_get_hdr_value_str(req, "Origin", origin, sizeof(origin)) != ESP_OK ||
+        httpd_req_get_hdr_value_str(req, "Host", host, sizeof(host)) != ESP_OK) {
+        return ESP_FAIL;
+    }
+    const char *o = origin;
+    if (strncmp(o, "http://", 7) == 0)       o += 7;
+    else if (strncmp(o, "https://", 8) == 0) o += 8;
+    else return ESP_FAIL;
+    if (strcasecmp(o, host) != 0) {
+        ESP_LOGW(TAG, "refused /ws/pose from origin %s", origin);
+        return ESP_FAIL;
+    }
+    return ESP_OK;
+}
+
+static esp_err_t ws_send_error(httpd_req_t *req, const char *why)
+{
+    cJSON *root = cJSON_CreateObject();
+    cJSON_AddStringToObject(root, "error", why);
+    char *text = cJSON_PrintUnformatted(root);
+    cJSON_Delete(root);
+    if (!text) return ESP_ERR_NO_MEM;
+    httpd_ws_frame_t f = { .type = HTTPD_WS_TYPE_TEXT, .payload = (uint8_t *)text, .len = strlen(text) };
+    esp_err_t err = httpd_ws_send_frame(req, &f);
+    cJSON_free(text);
+    return err;
+}
+
+/* The streaming path. Each text frame is a pose object, or {"stop":true}.
+ * Accepted poses get no reply, to keep a 30 Hz stream cheap; refusals get an
+ * {"error":...} frame so the sender can see why nothing moves. */
+#define WS_MAX_FRAME 256
+
+static esp_err_t ws_pose(httpd_req_t *req)
+{
+    if (req->method == HTTP_GET) return ESP_OK;   /* the upgrade itself */
+
+    httpd_ws_frame_t f = { 0 };
+    esp_err_t err = httpd_ws_recv_frame(req, &f, 0);
+    if (err != ESP_OK) return err;
+    if (f.type != HTTPD_WS_TYPE_TEXT) return ESP_OK;
+    if (f.len == 0 || f.len > WS_MAX_FRAME) return ws_send_error(req, "frame too large");
+
+    char buf[WS_MAX_FRAME + 1];
+    f.payload = (uint8_t *)buf;
+    err = httpd_ws_recv_frame(req, &f, WS_MAX_FRAME);
+    if (err != ESP_OK) return err;
+    buf[f.len] = '\0';
+
+    cJSON *o = cJSON_Parse(buf);
+    if (!o) return ws_send_error(req, "bad json");
+    if (cJSON_IsTrue(cJSON_GetObjectItemCaseSensitive(o, "stop"))) {
+        cJSON_Delete(o);
+        (void)eye_motion_follow_stop();   /* idempotent from the sender's side */
+        return ESP_OK;
+    }
+    eye_pose_t p;
+    err = pose_from_json(o, &p) ? eye_motion_follow(&p) : ESP_ERR_INVALID_ARG;
+    cJSON_Delete(o);
+    return (err == ESP_OK) ? ESP_OK : ws_send_error(req, follow_error(err));
+}
+
 /* ------------------------------------------------------------------- /mcp */
 
 /* Big enough for any MCP request this server accepts; tool arguments here are a
@@ -549,6 +666,10 @@ static const httpd_uri_t s_routes[] = {
     { .uri = "/api/defaults", .method = HTTP_POST, .handler = defaults_post },
     { .uri = "/api/release",  .method = HTTP_POST, .handler = release_post },
     { .uri = "/api/engage",   .method = HTTP_POST, .handler = engage_post },
+    { .uri = "/api/pose",     .method = HTTP_POST, .handler = pose_post },
+    { .uri = "/api/follow/stop", .method = HTTP_POST, .handler = follow_stop_post },
+    { .uri = "/ws/pose",      .method = HTTP_GET,  .handler = ws_pose,
+      .is_websocket = true, .ws_pre_handshake_cb = ws_origin_check },
     { .uri = "/mcp",          .method = HTTP_POST,   .handler = mcp_post },
     { .uri = "/mcp",          .method = HTTP_GET,    .handler = mcp_not_allowed },
     { .uri = "/mcp",          .method = HTTP_DELETE, .handler = mcp_not_allowed },

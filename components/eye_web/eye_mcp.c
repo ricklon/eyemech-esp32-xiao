@@ -149,6 +149,10 @@ static const char *motion_refusal(void)
                "engages them from the control page or serial console; this server "
                "cannot engage.";
     }
+    if (eye_motion_get_mode() == EYE_MODE_FOLLOW) {
+        return "The eyes are following a live pose stream, and a motion command would fight "
+               "it. It returns to its previous mode when the stream stops.";
+    }
     if (eye_motion_get_mode() == EYE_MODE_STANDBY) {
         return "The mechanism is in standby: stopped, with nothing scheduled. A person has "
                "to pick a mode at the control page or serial console before it moves.";

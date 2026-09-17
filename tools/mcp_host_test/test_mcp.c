@@ -250,6 +250,12 @@ static void test_motion_gating(void)
         CHECK(tool_is_error(&r) && strstr(tool_text(&r), "calibration"));
         done(&r);
     }
+    fake.mode = EYE_MODE_FOLLOW;
+    for (size_t i = 0; i < 4; i++) {
+        resp_t r = modern("tools/call", calls[i][0], calls[i][1]);
+        CHECK(tool_is_error(&r) && strstr(tool_text(&r), "pose stream"));
+        done(&r);
+    }
     fake.mode = EYE_MODE_STANDBY;
     for (size_t i = 0; i < 4; i++) {
         resp_t r = modern("tools/call", calls[i][0], calls[i][1]);
