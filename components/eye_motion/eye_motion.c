@@ -27,6 +27,8 @@ static float s_x_target = 90.0f, s_y_target = 90.0f;
 #define NVS_KEY_TRIM     "lid_trim"
 #define NVS_KEY_COEFF    "lid_coeff"
 #define NVS_KEY_BLINK    "blink_hold"
+#define NVS_KEY_GAP      "blink_gap"
+#define NVS_KEY_STYLE    "blink_style"
 
 /* How strongly each lid pair tracks vertical gaze. The reference values are
  * 0.8 upper / 0.4 lower, and the asymmetry between them is most of what reads
@@ -40,9 +42,16 @@ static float s_lid_trim = LID_TRIM_DEFAULT;
 static float s_coeff_upper = LID_COEFF_UPPER_DEFAULT;
 static float s_coeff_lower = LID_COEFF_LOWER_DEFAULT;
 static int   s_blink_hold_ms = EYE_BLINK_CLOSED_MS;
+static int   s_gap_min_ms = EYE_BLINK_GAP_MIN_MS;
+static int   s_gap_max_ms = EYE_BLINK_GAP_MAX_MS;
+static eye_blink_style_t s_blink_style = EYE_BLINK_BOTH;
 
 static eye_mode_t s_mode = EYE_MODE_AUTO;
 static bool       s_blink_requested;
+/* Set only by eye_motion_request_blink(): someone asked for a blink by name, so
+ * it is a blink even when automatic ones are winks. auto mode queues its own
+ * blinks through s_blink_requested alone. */
+static bool       s_blink_explicit;
 
 /* Indexed by eye_mode_t. */
 static const char *s_mode_names[] = { "tracking", "auto", "manual", "calibration", "anim", "standby", "follow" };
@@ -190,6 +199,15 @@ esp_err_t eye_motion_blink_now(void)
         eye_servo_write(lids[i], eye_servo_limits(lids[i]).min);   /* closed */
     }
     return ESP_OK;
+}
+
+/* One eye's two lids to closed. Reopening is eye_motion_open_lid(), which
+ * restores all four, so the open eye is simply rewritten where it already is. */
+static void wink_now(bool left)
+{
+    eye_servo_id_t upper = left ? EYE_TL : EYE_TR, lower = left ? EYE_BL : EYE_BR;
+    eye_servo_write(upper, eye_servo_limits(upper).min);
+    eye_servo_write(lower, eye_servo_limits(lower).min);
 }
 
 esp_err_t eye_motion_open_lid(void)
@@ -341,6 +359,90 @@ esp_err_t eye_motion_save_blink_hold(void)
     return err;
 }
 
+esp_err_t eye_motion_set_blink_gap_ms(int min_ms, int max_ms)
+{
+    if (min_ms < EYE_BLINK_GAP_FLOOR_MS || max_ms > EYE_BLINK_GAP_CEILING_MS || min_ms > max_ms) {
+        return ESP_ERR_INVALID_ARG;
+    }
+    s_gap_min_ms = min_ms;
+    s_gap_max_ms = max_ms;
+    return ESP_OK;
+}
+
+void eye_motion_get_blink_gap_ms(int *min_ms, int *max_ms)
+{
+    *min_ms = s_gap_min_ms;
+    *max_ms = s_gap_max_ms;
+}
+
+esp_err_t eye_motion_save_blink_gap(void)
+{
+    nvs_handle_t h;
+    esp_err_t err = nvs_open(NVS_NAMESPACE, NVS_READWRITE, &h);
+    if (err != ESP_OK) return err;
+    uint32_t v[2] = { (uint32_t)s_gap_min_ms, (uint32_t)s_gap_max_ms };
+    err = nvs_set_blob(h, NVS_KEY_GAP, v, sizeof(v));
+    if (err == ESP_OK) err = nvs_commit(h);
+    nvs_close(h);
+    ESP_LOGI(TAG, "blink gap %d..%d ms saved: %s", s_gap_min_ms, s_gap_max_ms, esp_err_to_name(err));
+    return err;
+}
+
+static const char *s_style_names[] = { "both", "alternate" };
+
+esp_err_t eye_motion_set_blink_style(eye_blink_style_t style)
+{
+    if (style != EYE_BLINK_BOTH && style != EYE_BLINK_ALTERNATE) return ESP_ERR_INVALID_ARG;
+    s_blink_style = style;
+    return ESP_OK;
+}
+
+eye_blink_style_t eye_motion_get_blink_style(void) { return s_blink_style; }
+
+const char *eye_motion_blink_style_name(eye_blink_style_t style)
+{
+    return (style == EYE_BLINK_BOTH || style == EYE_BLINK_ALTERNATE) ? s_style_names[style] : "?";
+}
+
+int eye_motion_blink_style_from_name(const char *name)
+{
+    for (int i = 0; name && i < 2; i++) {
+        if (strcmp(name, s_style_names[i]) == 0) return i;
+    }
+    return -1;
+}
+
+esp_err_t eye_motion_save_blink_style(void)
+{
+    nvs_handle_t h;
+    esp_err_t err = nvs_open(NVS_NAMESPACE, NVS_READWRITE, &h);
+    if (err != ESP_OK) return err;
+    err = nvs_set_u8(h, NVS_KEY_STYLE, (uint8_t)s_blink_style);
+    if (err == ESP_OK) err = nvs_commit(h);
+    nvs_close(h);
+    ESP_LOGI(TAG, "blink style %s saved: %s", eye_motion_blink_style_name(s_blink_style),
+             esp_err_to_name(err));
+    return err;
+}
+
+static void load_blink_gap_and_style(void)
+{
+    nvs_handle_t h;
+    if (nvs_open(NVS_NAMESPACE, NVS_READONLY, &h) != ESP_OK) return;
+    uint32_t v[2];
+    size_t len = sizeof(v);
+    if (nvs_get_blob(h, NVS_KEY_GAP, v, &len) == ESP_OK && len == sizeof(v) &&
+        eye_motion_set_blink_gap_ms((int)v[0], (int)v[1]) == ESP_OK) {
+        ESP_LOGI(TAG, "blink gap %d..%d ms from NVS", s_gap_min_ms, s_gap_max_ms);
+    }
+    uint8_t style;
+    if (nvs_get_u8(h, NVS_KEY_STYLE, &style) == ESP_OK &&
+        eye_motion_set_blink_style((eye_blink_style_t)style) == ESP_OK) {
+        ESP_LOGI(TAG, "blink style %s from NVS", eye_motion_blink_style_name(s_blink_style));
+    }
+    nvs_close(h);
+}
+
 static void load_blink_hold(void)
 {
     nvs_handle_t h;
@@ -394,7 +496,12 @@ esp_err_t eye_motion_nudge(float d_lr, float d_ud)
     return ESP_OK;   /* UD is applied by the loop, so lids stay in step */
 }
 
-esp_err_t eye_motion_request_blink(void) { s_blink_requested = true; return ESP_OK; }
+esp_err_t eye_motion_request_blink(void)
+{
+    s_blink_explicit = true;
+    s_blink_requested = true;
+    return ESP_OK;
+}
 
 float eye_motion_target_lr(void) { return s_x_target; }
 float eye_motion_target_ud(void) { return s_y_target; }
@@ -571,6 +678,7 @@ esp_err_t eye_motion_play(const char *name, int repeat)
         s_anim_repeat = repeat;      /* <0 loops; N plays N times */
         s_anim_frame = 0;
         s_blink_requested = false;
+        s_blink_explicit = false;
         s_mode = EYE_MODE_ANIM;          /* deliberately not set_mode(): that
                                           * would run neutral() and jump */
         anim_begin_frame(now_ms());
@@ -658,6 +766,7 @@ esp_err_t eye_motion_follow(const eye_pose_t *pose)
         s_follow_return = mode;
         s_follow_seeded = false;       /* the motion task seeds from what it last wrote */
         s_blink_requested = false;
+        s_blink_explicit = false;
         s_mode = EYE_MODE_FOLLOW;      /* not set_mode(): that would run neutral() and jump */
         ESP_LOGI(TAG, "following poses (was %s)", eye_motion_mode_name(mode));
     }
@@ -757,6 +866,7 @@ static void follow_tick(int64_t t)
 
     if (leaving && settled) {
         s_blink_requested = false;
+        s_blink_explicit = false;
         s_settle_until = t + EYE_ANIM_SETTLE_MS;
         s_mode = s_follow_return;   /* already at neutral: no set_mode() jump */
         ESP_LOGI(TAG, "follow %s — back to %s", stopping ? "stopped" : "timed out",
@@ -839,6 +949,7 @@ esp_err_t eye_motion_set_mode(eye_mode_t mode)
         eye_motion_neutral();
     }
     s_blink_requested = false;
+    s_blink_explicit = false;
     ESP_LOGI(TAG, "mode -> %s", eye_motion_mode_name(mode));
     return ESP_OK;
 }
@@ -851,7 +962,8 @@ static void motion_task(void *arg)
 
     enum { BLINK_IDLE, BLINK_CLOSED, BLINK_OPENING } blink_phase = BLINK_IDLE;
     int64_t blink_until   = 0;
-    int64_t next_blink_at = now_ms() + rand_range(EYE_BLINK_GAP_MIN_MS, EYE_BLINK_GAP_MAX_MS);
+    int64_t next_blink_at = now_ms() + rand_range(s_gap_min_ms, s_gap_max_ms);
+    bool    wink_left     = true;   /* ALTERNATE starts with the left eye */
     int64_t next_auto_at  = 0;
 
     for (;;) {
@@ -864,17 +976,24 @@ static void motion_task(void *arg)
             s_mode != EYE_MODE_STANDBY && s_mode != EYE_MODE_FOLLOW &&
             t >= s_settle_until) {
             if (blink_phase == BLINK_IDLE && (s_blink_requested || t >= next_blink_at)) {
+                bool asked = s_blink_explicit;
                 s_blink_requested = false;
+                s_blink_explicit = false;
                 blink_phase = BLINK_CLOSED;
                 blink_until = t + s_blink_hold_ms;
-                eye_motion_blink_now();
+                if (!asked && s_blink_style == EYE_BLINK_ALTERNATE) {
+                    wink_now(wink_left);
+                    wink_left = !wink_left;
+                } else {
+                    eye_motion_blink_now();
+                }
             } else if (blink_phase == BLINK_CLOSED && t >= blink_until) {
                 blink_phase = BLINK_OPENING;
                 blink_until = t + EYE_BLINK_OPENING_MS;
                 eye_motion_open_lid();
             } else if (blink_phase == BLINK_OPENING && t >= blink_until) {
                 blink_phase = BLINK_IDLE;
-                next_blink_at = t + rand_range(EYE_BLINK_GAP_MIN_MS, EYE_BLINK_GAP_MAX_MS);
+                next_blink_at = t + rand_range(s_gap_min_ms, s_gap_max_ms);
             }
         }
 
@@ -961,6 +1080,7 @@ esp_err_t eye_motion_start(void)
     load_lid_trim();
     load_lid_coeff();
     load_blink_hold();
+    load_blink_gap_and_style();
     if (xTaskCreate(motion_task, "eye_motion", 4096, NULL, 5, NULL) != pdPASS) {
         return ESP_ERR_NO_MEM;
     }

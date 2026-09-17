@@ -14,6 +14,8 @@
  *   POST /api/lid_trim    {"value":0..1}               was the trim pot
  *   POST /api/blink       —                            was the blink button
  *   POST /api/blink_hold  {"ms":30..400}               how long a blink stays shut
+ *   POST /api/blink_gap   {"min_ms","max_ms"}          pause between automatic blinks
+ *   POST /api/blink_style {"style":"both"|"alternate"} automatic blink, or alternating winks
  *   POST /api/anim        {"name":"look"|"roll","repeat":1}  -1 loops
  *   POST /api/servo       {"servo":"TL","angle":120}   calibration mode only
  *   POST /api/limits      {"servo":"TL","min":90,"max":170}

@@ -100,6 +100,15 @@
   blink closes fully, using Blink above to test. Save keeps it.</p>
   <label><span>Blink hold</span><input type="range" id="bh" min="30" max="400" step="10"><span class="num" id="bhval"></span></label>
   <div class="row"><button id="bhref">Back to 70 ms</button></div>
+  <p class="warn">Automatic blinks pause a random time between the two gaps below.
+  Alternate winks one eye, then the other next time; the Blink button is always a
+  full blink. Reference: 2–7 s, both. Save keeps them.</p>
+  <label><span>Blink gap min</span><input type="range" id="gmin" min="1" max="60" step="1"><span class="num" id="gminval"></span></label>
+  <label><span>Blink gap max</span><input type="range" id="gmax" min="1" max="60" step="1"><span class="num" id="gmaxval"></span></label>
+  <div class="row" id="bstyle">
+    <button data-style="both">Blink both eyes</button>
+    <button data-style="alternate">Alternate winks</button>
+  </div>
 </fieldset>
 
 <fieldset id="jogbox" hidden>
@@ -247,6 +256,22 @@ document.getElementById('bhref').onclick = () => {
   document.getElementById('bh').value = 70;
   post('/api/blink_hold', { ms: 70 }).then(refresh);
 };
+/* Seconds on the page, milliseconds on the wire. Moving min past max drags max
+   along (and the reverse), so the pair never posts a range the board refuses. */
+function syncGap(id, ms) {
+  const el = document.getElementById(id);
+  if (document.activeElement !== el && Number.isFinite(ms)) el.value = Math.round(ms / 1000);
+  document.getElementById(id + 'val').textContent = el.value + ' s';
+}
+['gmin', 'gmax'].forEach(id => document.getElementById(id).oninput = e => {
+  const lo = document.getElementById('gmin'), hi = document.getElementById('gmax');
+  if (+lo.value > +hi.value) (id === 'gmin' ? hi : lo).value = e.target.value;
+  document.getElementById('gminval').textContent = lo.value + ' s';
+  document.getElementById('gmaxval').textContent = hi.value + ' s';
+  post('/api/blink_gap', { min_ms: +lo.value * 1000, max_ms: +hi.value * 1000 });
+});
+document.querySelectorAll('#bstyle button').forEach(b =>
+  b.onclick = () => post('/api/blink_style', { style: b.dataset.style }).then(refresh));
 document.getElementById('coeffref').onclick = () => {
   document.getElementById('cu').value = 0.8;
   document.getElementById('cl').value = 0.4;
@@ -371,6 +396,10 @@ async function refresh() {
     syncSlider('cu', state.coeff_upper);
     syncSlider('cl', state.coeff_lower);
     syncHold(state.blink_hold_ms);
+    syncGap('gmin', state.blink_gap_min_ms);
+    syncGap('gmax', state.blink_gap_max_ms);
+    document.querySelectorAll('#bstyle button').forEach(b =>
+      b.setAttribute('aria-pressed', b.dataset.style === state.blink_style));
     renderAnims();
     animBox.querySelectorAll('button').forEach(b =>
       b.setAttribute('aria-pressed', b.dataset.anim === state.anim));

@@ -123,6 +123,11 @@ static esp_err_t state_get(httpd_req_t *req)
     cJSON_AddNumberToObject(root, "coeff_upper", eye_motion_get_coeff_upper());
     cJSON_AddNumberToObject(root, "coeff_lower", eye_motion_get_coeff_lower());
     cJSON_AddNumberToObject(root, "blink_hold_ms", eye_motion_get_blink_hold_ms());
+    int gap_min, gap_max;
+    eye_motion_get_blink_gap_ms(&gap_min, &gap_max);
+    cJSON_AddNumberToObject(root, "blink_gap_min_ms", gap_min);
+    cJSON_AddNumberToObject(root, "blink_gap_max_ms", gap_max);
+    cJSON_AddStringToObject(root, "blink_style", eye_motion_blink_style_name(eye_motion_get_blink_style()));
     cJSON_AddNumberToObject(root, "lr", eye_motion_target_lr());
     cJSON_AddNumberToObject(root, "ud", eye_motion_target_ud());
 
@@ -219,6 +224,41 @@ static esp_err_t blink_hold_post(httpd_req_t *req)
     if (err != ESP_OK) {
         return httpd_resp_send_err(req, HTTPD_400_BAD_REQUEST, "ms out of range");
     }
+    return send_ok(req);
+}
+
+/* The pause between automatic blinks. Omitted fields keep their value, so one
+ * slider can move alone. Not persisted — /api/save keeps it. */
+static esp_err_t blink_gap_post(httpd_req_t *req)
+{
+    cJSON *body = NULL;
+    if (read_json(req, &body) != ESP_OK) {
+        return httpd_resp_send_err(req, HTTPD_400_BAD_REQUEST, "bad json");
+    }
+    int min_ms, max_ms;
+    eye_motion_get_blink_gap_ms(&min_ms, &max_ms);
+    min_ms = (int)jnum(body, "min_ms", (float)min_ms);
+    max_ms = (int)jnum(body, "max_ms", (float)max_ms);
+    cJSON_Delete(body);
+    if (eye_motion_set_blink_gap_ms(min_ms, max_ms) != ESP_OK) {
+        return httpd_resp_send_err(req, HTTPD_400_BAD_REQUEST,
+                                   "need 1000 <= min_ms <= max_ms <= 60000");
+    }
+    return send_ok(req);
+}
+
+/* both | alternate. Not persisted — /api/save keeps it. */
+static esp_err_t blink_style_post(httpd_req_t *req)
+{
+    cJSON *body = NULL;
+    if (read_json(req, &body) != ESP_OK) {
+        return httpd_resp_send_err(req, HTTPD_400_BAD_REQUEST, "bad json");
+    }
+    const cJSON *v = cJSON_GetObjectItemCaseSensitive(body, "style");
+    int style = cJSON_IsString(v) ? eye_motion_blink_style_from_name(v->valuestring) : -1;
+    cJSON_Delete(body);
+    if (style < 0) return httpd_resp_send_err(req, HTTPD_400_BAD_REQUEST, "style must be both or alternate");
+    eye_motion_set_blink_style((eye_blink_style_t)style);
     return send_ok(req);
 }
 
@@ -429,6 +469,8 @@ static esp_err_t save_post(httpd_req_t *req)
     if (eye_motion_save_lid_trim() != ESP_OK ||
         eye_motion_save_lid_coeff() != ESP_OK ||
         eye_motion_save_blink_hold() != ESP_OK ||
+        eye_motion_save_blink_gap() != ESP_OK ||
+        eye_motion_save_blink_style() != ESP_OK ||
         eye_servo_save() != ESP_OK) {
         return httpd_resp_send_err(req, HTTPD_500_INTERNAL_SERVER_ERROR, "nvs write failed");
     }
@@ -671,6 +713,8 @@ static const httpd_uri_t s_routes[] = {
     { .uri = "/api/lid_coeff",.method = HTTP_POST, .handler = lid_coeff_post },
     { .uri = "/api/blink",    .method = HTTP_POST, .handler = blink_post },
     { .uri = "/api/blink_hold",.method = HTTP_POST, .handler = blink_hold_post },
+    { .uri = "/api/blink_gap", .method = HTTP_POST, .handler = blink_gap_post },
+    { .uri = "/api/blink_style",.method = HTTP_POST, .handler = blink_style_post },
     { .uri = "/api/anim",     .method = HTTP_POST, .handler = anim_post },
     { .uri = "/api/anim/stop",.method = HTTP_POST, .handler = anim_stop_post },
     { .uri = "/api/servo",    .method = HTTP_POST, .handler = servo_post },

@@ -288,3 +288,40 @@ The rates and timeout are compile-time constants in `eye_motion.h`, chosen, not
 measured. Would revisit if: tracked blinks look sluggish (raise the lid rate), a
 real stream jitters visibly (smoothing belongs in the sender, which has the
 timestamps), or the lid rates need to differ between upper and lower lids.
+
+## 2026-09-17 — Automatic blinks: adjustable gap, and an alternating-wink style
+
+Watching the rebuilt mechanism in manual mode, the reference cadence — a blink
+of all four lids every 2–7 s, from `micropython/main.py` — read as repetitive
+and fast. Both the gap and what an automatic blink does are now settings, saved
+with Save, and both default to the reference, so nothing changes until someone
+chooses to.
+
+- **Gap:** a random pause drawn from min..max, 1–60 s.
+- **Style:** `both` (the reference) or `alternate`, which winks one eye and then
+  the other next time, back and forth.
+- **Only automatic blinks follow the style**: the timer's, and the ones auto mode
+  queues. A blink asked for by name — the page's Blink button, `!blink`, the MCP
+  `blink` tool — is always both eyes, because that is what was asked for.
+
+Alternating winks are a real change to how the face reads, not a tweak, which is
+why the reference stays the default rather than being replaced.
+
+Would revisit if: alternate turns out to be the keeper, in which case make it the
+default and say so here.
+
+## 2026-09-17 — Chosen on this mechanism: alternating winks, 10–20 s, 150 ms hold
+
+Set at the bench and saved to NVS:
+
+- **Blink style `alternate`**: winks that alternate eyes, rather than all four
+  lids. Watched working: left and right eyes took turns, the other eye staying open.
+- **Blink gap 10–20 s**: the reference 2–7 s read as a repeated fast blink.
+- **Blink hold 150 ms**: the reference 70 ms reopens before these lids meet.
+
+Like the calibrated limits, these live in NVS, not in the source. The compiled
+defaults are still the reference (both, 2–7 s, 70 ms), so a board with erased
+NVS comes up blinking the original way until they are set again.
+
+Would revisit if: alternate survives a longer run without reading as a tic, in
+which case it becomes the default in the source, per the entry above.
