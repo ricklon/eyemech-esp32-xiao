@@ -6,7 +6,7 @@
 fake_t fake;
 
 static const char *const s_anims[] = { "look", "roll", NULL };
-static const char *const s_modes[] = { "tracking", "auto", "manual", "calibration", "anim" };
+static const char *const s_modes[] = { "tracking", "auto", "manual", "calibration", "anim", "standby" };
 static const char *const s_servos[] = { "LR", "UD", "TL", "BL", "TR", "BR" };
 
 void fake_reset(void)

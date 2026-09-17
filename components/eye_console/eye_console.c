@@ -81,7 +81,7 @@ static void cmd_help(void)
     "  !status                    mode, latch, vision, trim, heap, servos\r\n"
     "  !release                   ALL SERVOS LIMP, latched\r\n"
     "  !engage                    clear the latch, go to neutral\r\n"
-    "  !mode <name>               tracking | auto | manual | calibration\r\n"
+    "  !mode <name>               tracking | auto | manual | calibration | standby\r\n"
     "  !blink                     queue one blink\r\n"
     "  !trim <0..1>               lid openness\r\n"
     "  !lids <upper> <lower>      how hard lids track gaze (ref 0.8 0.4)\r\n"
@@ -272,7 +272,7 @@ static void cmd_mode(char **save)
 {
     const char *name = next_tok(save);
     int m = name ? eye_motion_mode_from_name(name) : -1;
-    if (m < 0) { printf("usage: !mode tracking|auto|manual|calibration\r\n"); return; }
+    if (m < 0) { printf("usage: !mode tracking|auto|manual|calibration|standby\r\n"); return; }
     eye_motion_set_mode((eye_mode_t)m);
     printf("mode -> %s\r\n", eye_motion_mode_name((eye_mode_t)m));
 }
@@ -422,8 +422,9 @@ static void handle(char *line)
         if (rep != NULL) n = (!strcmp(rep, "loop")) ? -1 : atoi(rep);
         if (n == 0) n = 1;
         esp_err_t err = eye_motion_play(name, n);
-        if (err == ESP_ERR_NOT_FOUND) printf("no animation '%s' — try !anim list\r\n", name);
-        else                          report("anim", err);
+        if (err == ESP_ERR_NOT_FOUND)          printf("no animation '%s' — try !anim list\r\n", name);
+        else if (err == ESP_ERR_INVALID_STATE) printf("in standby — pick a mode first\r\n");
+        else                                   report("anim", err);
     }
     else if (!strcmp(cmd, "servo"))    cmd_servo(&save);
     else if (!strcmp(cmd, "jog"))      cmd_jog(&save);

@@ -9,7 +9,7 @@
  *
  *   GET  /                control + calibration page (embedded, no CDN)
  *   GET  /api/state       mode, per-servo angle/limits/cfg, lid trim, vision
- *   POST /api/mode        {"mode":"tracking"|"auto"|"manual"|"calibration"}
+ *   POST /api/mode        {"mode":"tracking"|"auto"|"manual"|"calibration"|"standby"}
  *   POST /api/look        {"lr":deg,"ud":deg}          switches to manual
  *   POST /api/lid_trim    {"value":0..1}               was the trim pot
  *   POST /api/blink       —                            was the blink button

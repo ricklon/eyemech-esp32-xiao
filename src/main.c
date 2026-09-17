@@ -70,15 +70,15 @@ void app_main(void)
     bool vision = (eye_vision_init() == ESP_OK);
 
     if (eye_servo_safe_boot()) {
-        /* Bring-up default: drive nothing at all. Release FIRST so the mode
-         * change below cannot stage a write, then sit in calibration waiting
-         * for an explicit !engage. This is what makes it safe to reset, or to
-         * brown out, with the servo rail live and limits still unmeasured. */
+        /* Drive nothing at all. Release FIRST so no write can stage, then sit
+         * in standby: not calibration, which is a workflow, just stopped. This
+         * is what makes it safe to reset, or to brown out, with the servo rail
+         * live. Leaving standby takes a person. */
         eye_servo_release_all();
-        eye_motion_set_mode(EYE_MODE_CALIBRATION);
-        ESP_LOGW(TAG, "SAFE BOOT — servos released, nothing driven. "
-                      "'!engage' then move one axis at a time. "
-                      "'!safeboot off' once limits are calibrated.");
+        eye_motion_set_mode(EYE_MODE_STANDBY);
+        ESP_LOGW(TAG, "SAFE BOOT — standby, servos released, nothing driven. "
+                      "'!engage' then '!mode auto' to run, or '!mode calibration' "
+                      "to work one axis at a time.");
     } else {
         /* 4. Ease into neutral rather than commanding it outright, which would
          *    drive all six servos there at full speed. A cold start recovers

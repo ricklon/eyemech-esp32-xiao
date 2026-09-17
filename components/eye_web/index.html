@@ -61,6 +61,7 @@
     <button data-mode="auto">Auto</button>
     <button data-mode="manual">Manual</button>
     <button data-mode="calibration">Calibration</button>
+    <button data-mode="standby">Standby</button>
   </div>
 </fieldset>
 
@@ -128,6 +129,7 @@
 
 <fieldset>
   <legend>Servos</legend>
+  <p class="warn" id="sbynote" hidden>Standby: nothing is driven and nothing is scheduled, blinks included. Safe boot starts here. Picking Auto, Manual or Tracking moves every servo to neutral at full speed.</p>
   <p class="warn" id="calnote" hidden>Calibration mode: angle fields write directly to the servo. Small steps.</p>
   <p class="warn">Min µs and Max µs are the pulse range the servo is driven with, not
   a limit — changing them changes what every angle means, including the ones already
@@ -356,6 +358,7 @@ async function refresh() {
     document.querySelectorAll('#modes button').forEach(b =>
       b.setAttribute('aria-pressed', b.dataset.mode === state.mode));
     document.getElementById('calnote').hidden = state.mode !== 'calibration';
+    document.getElementById('sbynote').hidden = state.mode !== 'standby';
     jogBox.hidden = state.mode !== 'calibration';   /* the API refuses anyway */
     fillJogServos();
     const sb = document.getElementById('safeboot');

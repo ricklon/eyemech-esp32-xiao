@@ -44,7 +44,9 @@ static int   s_blink_hold_ms = EYE_BLINK_CLOSED_MS;
 static eye_mode_t s_mode = EYE_MODE_AUTO;
 static bool       s_blink_requested;
 
-static const char *s_mode_names[] = { "tracking", "auto", "manual", "calibration", "anim" };
+/* Indexed by eye_mode_t. */
+static const char *s_mode_names[] = { "tracking", "auto", "manual", "calibration", "anim", "standby" };
+#define MODE_COUNT (int)(sizeof(s_mode_names) / sizeof(s_mode_names[0]))
 
 static inline float clampf(float v, float lo, float hi)
 {
@@ -170,8 +172,9 @@ esp_err_t eye_motion_engage(void)
      * drive something into a hard stop. Release left every channel's full-off
      * bit set, so leaving them alone here means no pulses at all until an
      * explicit write -- which is what makes powering the servo rail safe. */
-    if (s_mode == EYE_MODE_CALIBRATION) {
-        ESP_LOGI(TAG, "engaged in calibration — no channel driven until you write one");
+    if (s_mode == EYE_MODE_CALIBRATION || s_mode == EYE_MODE_STANDBY) {
+        ESP_LOGI(TAG, "engaged in %s — no channel driven until something writes one",
+                 eye_motion_mode_name(s_mode));
         return ESP_OK;
     }
 
@@ -558,6 +561,7 @@ static void anim_begin_frame(int64_t t)
 esp_err_t eye_motion_play(const char *name, int repeat)
 {
     if (name == NULL) return ESP_ERR_INVALID_ARG;
+    if (s_mode == EYE_MODE_STANDBY) return ESP_ERR_INVALID_STATE;
     for (int i = 0; i < ANIM_COUNT; i++) {
         if (strcmp(name, s_anims[i].name) != 0) continue;
 
@@ -649,13 +653,13 @@ static bool anim_tick(int64_t t)
 
 const char *eye_motion_mode_name(eye_mode_t mode)
 {
-    return (mode <= EYE_MODE_ANIM) ? s_mode_names[mode] : "?";
+    return ((int)mode < MODE_COUNT) ? s_mode_names[mode] : "?";
 }
 
 int eye_motion_mode_from_name(const char *name)
 {
     if (name == NULL) return -1;
-    for (int i = 0; i < 5; i++) {
+    for (int i = 0; i < MODE_COUNT; i++) {
         if (strcmp(name, s_mode_names[i]) == 0) return i;
     }
     return -1;
@@ -666,14 +670,24 @@ eye_mode_t eye_motion_get_mode(void) { return s_mode; }
 esp_err_t eye_motion_set_mode(eye_mode_t mode)
 {
     if (mode == s_mode) return ESP_OK;
+    eye_mode_t from = s_mode;
     s_mode = mode;
     /* Every mode change in the original ended with neutral() and a cleared
      * blink phase. Keep that — it is what stops a half-finished blink from
      * leaving the lids shut. Calibration seeds 90° instead, once, on entry:
      * the loop must not keep rewriting it, or direct writes cannot stick. */
-    if (mode == EYE_MODE_CALIBRATION) {
-        eye_motion_calibrate();
+    if (mode == EYE_MODE_STANDBY) {
+        /* Nothing. Standby holds whatever is already there and schedules
+         * nothing, so entering it must not move anything either. */
+    } else if (mode == EYE_MODE_CALIBRATION) {
+        /* From standby the servos may be engaged but limp at unknown angles, and
+         * seeding 90 would drive all six at once -- exactly what calibration is
+         * one-servo-at-a-time to avoid. So only seed when coming from a mode
+         * that was already driving them. */
+        if (from != EYE_MODE_STANDBY) eye_motion_calibrate();
     } else {
+        /* Leaving standby lands here too, at full speed: after a release there is
+         * no known position to ease from. */
         eye_motion_neutral();
     }
     s_blink_requested = false;
@@ -698,6 +712,7 @@ static void motion_task(void *arg)
         /* Blink runs in every mode except calibration, where the whole point is
          * that nothing moves off 90°. */
         if (s_mode != EYE_MODE_CALIBRATION && s_mode != EYE_MODE_ANIM &&
+            s_mode != EYE_MODE_STANDBY &&
             t >= s_settle_until) {
             if (blink_phase == BLINK_IDLE && (s_blink_requested || t >= next_blink_at)) {
                 s_blink_requested = false;
@@ -777,6 +792,10 @@ static void motion_task(void *arg)
              * write within 10 ms — which is the only thing this mode exists
              * to allow. Nothing else moves either: the blink state machine is
              * skipped in calibration above. */
+            break;
+
+        case EYE_MODE_STANDBY:
+            /* Nothing, and no blinks: see the blink gate above. */
             break;
         }
 

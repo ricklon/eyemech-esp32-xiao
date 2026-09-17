@@ -26,7 +26,7 @@ not wired to it, so there is no hardware output-disable. `!release` works, but
 over I²C — it needs a functioning bus and a live MCU. The switch needs neither.
 
 **Leave `!safeboot on` until every axis is measured.** The board then comes up
-with all channels released and sits in calibration mode. Without it, any reset
+with all channels released and sits in standby. Without it, any reset
 with the rail live drives all six channels to their stored angles within a
 second — and a brownout on the servo rail *causes* a reset, which makes the
 failure self-reinforcing.
@@ -69,7 +69,9 @@ needs no network, which is the point.
 
 ### Gaze axes (LR, UD)
 
-1. `!mode calibration` then `!engage`. Nothing is driven yet.
+1. `!mode calibration` then `!engage`. Nothing is driven yet. From standby,
+   entering calibration seeds nothing either — but from any running mode it
+   drives all six to 90, so go through standby (or a fresh safe boot) first.
 2. `!servo LR 90` — seats the axis at a known position. **First motion; hand on
    the rail switch.**
 3. `!jog LR +5` outward, watching the linkage. 2° for the last few degrees.

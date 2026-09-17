@@ -68,7 +68,7 @@ def main():
     sub.add_parser("engage")
 
     m = sub.add_parser("mode")
-    m.add_argument("mode", choices=["tracking", "auto", "manual", "calibration"])
+    m.add_argument("mode", choices=["tracking", "auto", "manual", "calibration", "standby"])
 
     lk = sub.add_parser("look")
     lk.add_argument("lr", type=float)
