@@ -309,3 +309,19 @@ why the reference stays the default rather than being replaced.
 
 Would revisit if: alternate turns out to be the keeper, in which case make it the
 default and say so here.
+
+## 2026-09-17 — Chosen on this mechanism: alternating winks, 10–20 s, 150 ms hold
+
+Set at the bench and saved to NVS:
+
+- **Blink style `alternate`**: winks that alternate eyes, rather than all four
+  lids. Watched working: left and right eyes took turns, the other eye staying open.
+- **Blink gap 10–20 s**: the reference 2–7 s read as a repeated fast blink.
+- **Blink hold 150 ms**: the reference 70 ms reopens before these lids meet.
+
+Like the calibrated limits, these live in NVS, not in the source. The compiled
+defaults are still the reference (both, 2–7 s, 70 ms), so a board with erased
+NVS comes up blinking the original way until they are set again.
+
+Would revisit if: alternate survives a longer run without reading as a tic, in
+which case it becomes the default in the source, per the entry above.
