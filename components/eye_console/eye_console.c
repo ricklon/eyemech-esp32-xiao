@@ -1,0 +1,501 @@
+#include "eye_console.h"
+#include "board_pins.h"
+#include "eye_motion.h"
+#include "eye_net.h"
+#include "eye_servo.h"
+#include "eye_vision.h"
+
+#include <stdio.h>
+#include <stdlib.h>
+#include <string.h>
+#include <unistd.h>
+#include "esp_log.h"
+#include "esp_system.h"
+#include "freertos/FreeRTOS.h"
+#include "freertos/task.h"
+
+static const char *TAG = "eye_console";
+
+#define EYE_LINE_MAX 128
+#define TASK_STACK  4096
+#define TASK_PRIO   2
+
+/* ------------------------------------------------------------------ helpers */
+
+/* Every calibration verb is gated the same way /api/servo is: direct writes
+ * bypass the motion layer, which is what you want while fitting horns and
+ * exactly what you do not want while something else is driving. */
+static bool require_calibration(void)
+{
+    if (eye_motion_get_mode() == EYE_MODE_CALIBRATION) return true;
+    printf("not in calibration mode — try: !mode calibration\r\n");
+    return false;
+}
+
+static int servo_arg(const char *name)
+{
+    int id = eye_servo_from_name(name ? name : "");
+    if (id < 0) printf("unknown servo '%s' (LR UD TL BL TR BR)\r\n", name ? name : "");
+    return id;
+}
+
+/* Push stdout all the way to the host, mid-line.
+ *
+ * The console is on USB-Serial-JTAG with no VFS driver installed (the reason
+ * is in sdkconfig.defaults). In that mode usb_serial_jtag_tx_char_no_driver()
+ * only raises the TX FIFO's flush bit on a '\n', so fflush() moves an echoed
+ * keystroke into the FIFO and leaves it there: you type blind until Enter
+ * flushes the whole line at once. fsync() is what actually flushes, and it
+ * returns immediately when no host is attached, so it costs nothing when
+ * nobody is watching. */
+static void push_stdout(void)
+{
+    fflush(stdout);
+    (void)fsync(fileno(stdout));
+}
+
+/* strtok_r over a mutable line; returns NULL when exhausted. */
+static char *next_tok(char **save)
+{
+    return strtok_r(NULL, " \t", save);
+}
+
+static void report(const char *what, esp_err_t err)
+{
+    if (err == ESP_OK) {
+        printf("%s ok\r\n", what);
+    } else if (err == ESP_ERR_INVALID_STATE) {
+        printf("%s refused: position unknown — seat it first with "
+               "!servo <name> <angle>\r\n", what);
+    } else {
+        printf("%s failed: %s\r\n", what, esp_err_to_name(err));
+    }
+}
+
+/* --------------------------------------------------------------- commands */
+
+static void cmd_help(void)
+{
+    printf(
+    "\r\ncommands (servo names: LR UD TL BL TR BR)\r\n"
+    "  !status                    mode, latch, vision, trim, heap, servos\r\n"
+    "  !release                   ALL SERVOS LIMP, latched\r\n"
+    "  !engage                    clear the latch, go to neutral\r\n"
+    "  !mode <name>               tracking | auto | manual | calibration\r\n"
+    "  !blink                     queue one blink\r\n"
+    "  !trim <0..1>               lid openness\r\n"
+    "  !lids <upper> <lower>      how hard lids track gaze (ref 0.8 0.4)\r\n"
+    "  !look <lr> <ud>            manual gaze, degrees\r\n"
+    "  !anim <name> [n|loop]      play an animation, n times or forever\r\n"
+    "  !anim stop                 end a loop after the current cycle\r\n"
+    "networking:\r\n"
+    "  !wifi                      link, SSID, IP, access point\r\n"
+    "  !wifi list                 saved profiles\r\n"
+    "  !wifi scan                 nearby networks\r\n"
+    "  !wifi set <ssid> [pw]      join now, saved only if it works\r\n"
+    "  !wifi set <n> <ssid> [pw]  write profile n without trying it\r\n"
+    "  !wifi connect <n>          switch to profile n\r\n"
+    "  !wifi clear <n>            forget profile n\r\n"
+    "  !wifi ap                   stop roaming, stay on the access point\r\n"
+    "calibration mode only:\r\n"
+    "  !servo <name> <angle>      absolute angle\r\n"
+    "  !jog <name> <+/-deg>       step from the last commanded angle\r\n"
+    "  !mark <name> min|max       record where it is now as an endpoint\r\n"
+    "  !limits <name> <min> <max>\r\n"
+    "  !cfg <name> min_us|max_us|trim_us <value>\r\n"
+    "  !save                      commit to NVS\r\n"
+    "  !defaults                  restore the built-in table (not saved)\r\n"
+    "  !safeboot [on|off]         boot released instead of into motion\r\n"
+    "  !reboot\r\n\r\n");
+}
+
+static void cmd_status(void)
+{
+    printf("\r\n=== eyemech %s on %s ===\r\n", EYEMECH_VERSION, BOARD_NAME);
+    printf("mode      : %s%s\r\n", eye_motion_mode_name(eye_motion_get_mode()),
+           eye_servo_is_released() ? "   *** RELEASED ***" : "");
+    printf("vision    : %s\r\n", eye_vision_present() ? "detected" : "absent");
+    printf("lid trim  : %.2f\r\n", (double)eye_motion_get_lid_trim());
+    printf("safe boot : %s\r\n", eye_servo_safe_boot() ? "ON (boots released)" : "OFF");
+    printf("lid track : upper %.2f  lower %.2f\r\n",
+           (double)eye_motion_get_coeff_upper(), (double)eye_motion_get_coeff_lower());
+    printf("free heap : %u bytes\r\n", (unsigned)esp_get_free_heap_size());
+    printf("%-5s %-3s %9s %8s %8s %8s %8s %8s\r\n",
+           "name", "ch", "angle", "min", "max", "min_us", "max_us", "trim_us");
+    for (int i = 0; i < EYE_SERVO_COUNT; i++) {
+        eye_limits_t l    = eye_servo_limits((eye_servo_id_t)i);
+        eye_servo_cfg_t c = eye_servo_cfg((eye_servo_id_t)i);
+        float a = eye_servo_read((eye_servo_id_t)i);
+        char angle[12];
+        /* "?" rather than a number: with no feedback, an unwritten or released
+         * channel's position is genuinely unknown, not zero. */
+        if (a != a) snprintf(angle, sizeof(angle), "%9s", "?");
+        else        snprintf(angle, sizeof(angle), "%9.1f", (double)a);
+        printf("%-5s %-3d %s %8.1f %8.1f %8u %8u %8d\r\n",
+               eye_servo_name((eye_servo_id_t)i), i, angle,
+               (double)l.min, (double)l.max,
+               (unsigned)c.min_us, (unsigned)c.max_us, (int)c.trim_us);
+    }
+    printf("\r\n");
+}
+
+/* !wifi — the reason this console exists. Credentials go in over the cable,
+ * never over the air, and the password is never echoed back. */
+static void cmd_wifi(char **save)
+{
+    const char *sub = next_tok(save);
+    char buf[33];
+
+    if (sub == NULL || !strcmp(sub, "status")) {
+        eye_net_ssid(buf, sizeof(buf));
+        printf("link    : %s\r\n",
+               eye_net_state() == EYE_NET_STA_CONNECTED ? "station" :
+               eye_net_state() == EYE_NET_AP_ONLY       ? "access point only" : "connecting");
+        printf("ssid    : %s\r\n", buf);
+        eye_net_ip(buf, sizeof(buf));
+        printf("ip      : %s\r\n", buf[0] ? buf : "(none)");
+        printf("ap      : %s (%d client(s))\r\n", eye_net_ap_ssid(), eye_net_ap_clients());
+        int act = eye_net_active_profile();
+        if (act < 0) printf("active  : none yet\r\n");
+        else         printf("active  : profile %d\r\n", act + 1);
+        return;
+    }
+
+    if (!strcmp(sub, "list")) {
+        int oldest = eye_net_oldest_profile();
+        int used = 0;
+        for (int i = 0; i < EYE_NET_PROFILES; i++) {
+            eye_net_profile_ssid(i, buf, sizeof(buf));
+            if (buf[0]) used++;
+            printf("  [%d] %s%s\r\n", i + 1, buf[0] ? buf : "(empty)",
+                   i == eye_net_active_profile() ? "   <- boot default" : "");
+        }
+        /* Only worth mentioning when the next join actually costs something. */
+        if (used == EYE_NET_PROFILES && oldest >= 0) {
+            eye_net_profile_ssid(oldest, buf, sizeof(buf));
+            printf("  full — the next network you join replaces [%d] %s\r\n",
+                   oldest + 1, buf);
+        }
+        return;
+    }
+
+    if (!strcmp(sub, "scan")) {
+        if (eye_net_scan_start() != ESP_OK) { printf("scan busy\r\n"); return; }
+        printf("scanning...\r\n");
+        fflush(stdout);
+        for (int i = 0; i < 40 && eye_net_scan_busy(); i++) vTaskDelay(pdMS_TO_TICKS(250));
+        static eye_net_scan_entry_t found[EYE_NET_SCAN_MAX];
+        int n = eye_net_scan_results(found, EYE_NET_SCAN_MAX);
+        if (n == 0) { printf("no networks found\r\n"); return; }
+        for (int i = 0; i < n; i++) {
+            printf("  %-32s %4d dBm  %s\r\n", found[i].ssid, found[i].rssi,
+                   found[i].secure ? "secured" : "open");
+        }
+        return;
+    }
+
+    if (!strcmp(sub, "set") || !strcmp(sub, "join")) {
+        const char *a = next_tok(save);
+        const char *b = next_tok(save);
+        const char *c = next_tok(save);   /* absent = open network */
+
+        /* A bare slot digit with an SSID behind it still writes that slot
+         * outright. Everything else is the common case — credentials, no slot
+         * — and goes through the join, which picks the slot itself. */
+        bool is_slot = a && a[0] >= '1' && a[0] <= '0' + EYE_NET_PROFILES && a[1] == '\0';
+        if (is_slot && b) {
+            int n = a[0] - '1';
+            esp_err_t err = eye_net_set_profile(n, b, c ? c : "");
+            if (err == ESP_OK) printf("profile %d written — !wifi connect %d\r\n", n + 1, n + 1);
+            else               printf("could not save: %s\r\n", esp_err_to_name(err));
+            return;
+        }
+        if (!a) {
+            printf("usage: !wifi set <ssid> [password]\r\n"
+                   "       !wifi set <1-%d> <ssid> [password]   (no join, writes the slot)\r\n",
+                   EYE_NET_PROFILES);
+            return;
+        }
+
+        esp_err_t err = eye_net_join(a, b ? b : "");
+        if (err != ESP_OK) {
+            printf("could not start join: %s\r\n", esp_err_to_name(err));
+            return;
+        }
+        printf("joining '%s'...\r\n", a);   /* the password is never echoed */
+        fflush(stdout);
+
+        /* The attempt runs on the network manager task. A wrong password on
+         * WPA3 costs about six seconds per association attempt and there are
+         * three retries behind the first try, so the verdict can be 25s away;
+         * wait long enough to actually report it. */
+        int slot = -1;
+        eye_net_join_state_t st = EYE_NET_JOIN_BUSY;
+        for (int i = 0; i < 180; i++) {
+            st = eye_net_join_result(&slot);
+            if (st != EYE_NET_JOIN_BUSY) break;
+            vTaskDelay(pdMS_TO_TICKS(250));
+        }
+
+        if (st == EYE_NET_JOIN_OK) {
+            eye_net_ip(buf, sizeof(buf));
+            printf("joined '%s' — saved as profile %d, http://%s/\r\n", a, slot + 1, buf);
+        } else if (st == EYE_NET_JOIN_BUSY) {
+            printf("still trying — check !wifi status\r\n");
+        } else {
+            printf("could not join '%s' — nothing saved, check the password\r\n", a);
+        }
+        return;
+    }
+
+    if (!strcmp(sub, "connect") || !strcmp(sub, "clear")) {
+        const char *slot = next_tok(save);
+        if (!slot) { printf("usage: !wifi %s <1-%d>\r\n", sub, EYE_NET_PROFILES); return; }
+        int n = atoi(slot) - 1;
+        esp_err_t err = (sub[0] == 'c' && sub[1] == 'o')
+                        ? eye_net_connect_profile(n) : eye_net_clear_profile(n);
+        report(sub, err);
+        return;
+    }
+
+    if (!strcmp(sub, "ap")) { report("ap", eye_net_force_ap()); return; }
+
+    /* The natural first guess is "!wifi <ssid> <password>", which lands here.
+     * Say what to type instead of only listing subcommands. */
+    printf("usage: !wifi [status|list|scan|set|join|connect|clear|ap]\r\n"
+           "to join a network: !wifi set <ssid> [password]\r\n");
+}
+
+static void cmd_mode(char **save)
+{
+    const char *name = next_tok(save);
+    int m = name ? eye_motion_mode_from_name(name) : -1;
+    if (m < 0) { printf("usage: !mode tracking|auto|manual|calibration\r\n"); return; }
+    eye_motion_set_mode((eye_mode_t)m);
+    printf("mode -> %s\r\n", eye_motion_mode_name((eye_mode_t)m));
+}
+
+static void cmd_servo(char **save)
+{
+    if (!require_calibration()) return;
+    const char *name = next_tok(save);
+    const char *ang  = next_tok(save);
+    if (!name || !ang) { printf("usage: !servo <name> <angle>\r\n"); return; }
+    int id = servo_arg(name);
+    if (id < 0) return;
+    report("servo", eye_servo_write((eye_servo_id_t)id, strtof(ang, NULL)));
+}
+
+static void cmd_jog(char **save)
+{
+    if (!require_calibration()) return;
+    const char *name = next_tok(save);
+    const char *d    = next_tok(save);
+    if (!name || !d) { printf("usage: !jog <name> <+/-deg>\r\n"); return; }
+    int id = servo_arg(name);
+    if (id < 0) return;
+    esp_err_t err = eye_servo_jog((eye_servo_id_t)id, strtof(d, NULL));
+    if (err == ESP_OK) {
+        printf("%s -> %.1f\r\n", eye_servo_name((eye_servo_id_t)id),
+               (double)eye_servo_read((eye_servo_id_t)id));
+    } else {
+        report("jog", err);
+    }
+}
+
+static void cmd_mark(char **save)
+{
+    if (!require_calibration()) return;
+    const char *name = next_tok(save);
+    const char *end  = next_tok(save);
+    if (!name || !end || (strcmp(end, "min") != 0 && strcmp(end, "max") != 0)) {
+        printf("usage: !mark <name> min|max\r\n");
+        return;
+    }
+    int id = servo_arg(name);
+    if (id < 0) return;
+    esp_err_t err = eye_servo_mark((eye_servo_id_t)id, strcmp(end, "max") == 0);
+    if (err == ESP_OK) {
+        eye_limits_t l = eye_servo_limits((eye_servo_id_t)id);
+        printf("%s limits now min=%.1f max=%.1f (use !save to keep)\r\n",
+               eye_servo_name((eye_servo_id_t)id), (double)l.min, (double)l.max);
+    } else {
+        report("mark", err);
+    }
+}
+
+static void cmd_limits(char **save)
+{
+    if (!require_calibration()) return;
+    const char *name = next_tok(save);
+    const char *mn   = next_tok(save);
+    const char *mx   = next_tok(save);
+    if (!name || !mn || !mx) { printf("usage: !limits <name> <min> <max>\r\n"); return; }
+    int id = servo_arg(name);
+    if (id < 0) return;
+    /* No min<max check: mirrored servos legitimately invert. */
+    eye_limits_t l = { strtof(mn, NULL), strtof(mx, NULL) };
+    report("limits", eye_servo_set_limits((eye_servo_id_t)id, l));
+}
+
+static void cmd_cfg(char **save)
+{
+    if (!require_calibration()) return;
+    const char *name  = next_tok(save);
+    const char *field = next_tok(save);
+    const char *val   = next_tok(save);
+    if (!name || !field || !val) {
+        printf("usage: !cfg <name> min_us|max_us|trim_us <value>\r\n");
+        return;
+    }
+    int id = servo_arg(name);
+    if (id < 0) return;
+
+    eye_servo_cfg_t c = eye_servo_cfg((eye_servo_id_t)id);
+    long v = strtol(val, NULL, 10);
+    if      (strcmp(field, "min_us")  == 0) c.min_us  = (uint16_t)v;
+    else if (strcmp(field, "max_us")  == 0) c.max_us  = (uint16_t)v;
+    else if (strcmp(field, "trim_us") == 0) c.trim_us = (int16_t)v;
+    else { printf("unknown field '%s'\r\n", field); return; }
+
+    report("cfg", eye_servo_set_cfg((eye_servo_id_t)id, c));
+}
+
+static void handle(char *line)
+{
+    char *save = NULL;
+    char *cmd = strtok_r(line, " \t", &save);
+    if (cmd == NULL) return;
+    cmd++;   /* skip the '!' */
+
+    if      (!strcmp(cmd, "help"))     cmd_help();
+    else if (!strcmp(cmd, "status"))   cmd_status();
+    else if (!strcmp(cmd, "release"))  report("release", eye_servo_release_all());
+    else if (!strcmp(cmd, "engage"))   report("engage",  eye_motion_engage());
+    else if (!strcmp(cmd, "blink"))    report("blink",   eye_motion_request_blink());
+    else if (!strcmp(cmd, "mode"))     cmd_mode(&save);
+    else if (!strcmp(cmd, "wifi"))     cmd_wifi(&save);
+    else if (!strcmp(cmd, "lids")) {
+        const char *u = next_tok(&save), *l = next_tok(&save);
+        if (u && l) {
+            report("lids", eye_motion_set_lid_coeff(strtof(u, NULL), strtof(l, NULL)));
+        } else if (u) {
+            printf("usage: !lids <upper> <lower>   (reference 0.8 0.4)\r\n");
+        }
+        printf("lid tracking: upper %.2f  lower %.2f\r\n",
+               (double)eye_motion_get_coeff_upper(),
+               (double)eye_motion_get_coeff_lower());
+    }
+    else if (!strcmp(cmd, "anim")) {
+        const char *name = next_tok(&save);
+        const char *const *all = eye_motion_anim_names();
+        if (name == NULL || !strcmp(name, "list")) {
+            printf("animations:\r\n");
+            for (int i = 0; all[i]; i++) {
+                printf("  %-10s %s\r\n", all[i], eye_motion_anim_desc(all[i]));
+            }
+            return;
+        }
+        if (!strcmp(name, "stop")) {
+            esp_err_t serr = eye_motion_anim_stop();
+            printf(serr == ESP_OK ? "stopping after this cycle\r\n"
+                                  : "nothing playing\r\n");
+            return;
+        }
+        const char *rep = next_tok(&save);
+        int n = 1;
+        if (rep != NULL) n = (!strcmp(rep, "loop")) ? -1 : atoi(rep);
+        if (n == 0) n = 1;
+        esp_err_t err = eye_motion_play(name, n);
+        if (err == ESP_ERR_NOT_FOUND) printf("no animation '%s' — try !anim list\r\n", name);
+        else                          report("anim", err);
+    }
+    else if (!strcmp(cmd, "servo"))    cmd_servo(&save);
+    else if (!strcmp(cmd, "jog"))      cmd_jog(&save);
+    else if (!strcmp(cmd, "mark"))     cmd_mark(&save);
+    else if (!strcmp(cmd, "limits"))   cmd_limits(&save);
+    else if (!strcmp(cmd, "cfg"))      cmd_cfg(&save);
+    else if (!strcmp(cmd, "save")) {
+        esp_err_t err = eye_servo_save();
+        if (err == ESP_OK) err = eye_motion_save_lid_trim();
+        if (err == ESP_OK) err = eye_motion_save_lid_coeff();
+        report("save", err);
+    }
+    else if (!strcmp(cmd, "safeboot")) {
+        const char *v = next_tok(&save);
+        if (v && (!strcmp(v, "on") || !strcmp(v, "off"))) {
+            report("safeboot", eye_servo_set_safe_boot(!strcmp(v, "on")));
+        } else if (v) {
+            printf("usage: !safeboot [on|off]\r\n");
+        }
+        printf("safe boot is %s\r\n", eye_servo_safe_boot() ? "ON" : "OFF");
+    }
+    else if (!strcmp(cmd, "defaults")) report("defaults", eye_servo_reset_defaults());
+    else if (!strcmp(cmd, "trim")) {
+        const char *v = next_tok(&save);
+        if (!v) { printf("usage: !trim <0..1>\r\n"); return; }
+        report("trim", eye_motion_set_lid_trim(strtof(v, NULL)));
+    } else if (!strcmp(cmd, "look")) {
+        const char *a = next_tok(&save), *b = next_tok(&save);
+        if (!a || !b) { printf("usage: !look <lr> <ud>\r\n"); return; }
+        eye_motion_set_mode(EYE_MODE_MANUAL);
+        report("look", eye_motion_look(strtof(a, NULL), strtof(b, NULL)));
+    } else if (!strcmp(cmd, "reboot")) {
+        printf("rebooting...\r\n");
+        fflush(stdout);
+        vTaskDelay(pdMS_TO_TICKS(200));
+        esp_restart();
+    } else {
+        printf("unknown command '%s' — try !help\r\n", cmd);
+    }
+    fflush(stdout);
+}
+
+/* ------------------------------------------------------------------- task */
+
+static void console_task(void *arg)
+{
+    (void)arg;
+    char buf[EYE_LINE_MAX];
+    size_t len = 0;
+
+    vTaskDelay(pdMS_TO_TICKS(500));   /* let the monitor attach */
+    printf("\r\n[eye_console] ready — type !help\r\n");
+    fflush(stdout);
+
+    for (;;) {
+        int c = getchar();
+        if (c == EOF) {
+            /* No VFS driver is installed on purpose (see sdkconfig.defaults),
+             * so stdin is non-blocking and idles here rather than parking on a
+             * read. 10 ms is far below human typing rates. */
+            vTaskDelay(pdMS_TO_TICKS(10));
+            continue;
+        }
+        if (c == '\r' || c == '\n') {
+            fputs("\r\n", stdout);
+            if (len > 0) {
+                buf[len] = '\0';
+                /* Only act on '!' lines. Pasted log output cannot move a servo. */
+                if (buf[0] == '!') handle(buf);
+                len = 0;
+            }
+            fflush(stdout);
+        } else if (c == '\b' || c == 0x7f) {
+            if (len > 0) { len--; fputs("\b \b", stdout); push_stdout(); }
+        } else if (c >= 0x20 && c < 0x7f && len < sizeof(buf) - 1) {
+            buf[len++] = (char)c;
+            fputc(c, stdout);
+            push_stdout();
+        }
+    }
+}
+
+esp_err_t eye_console_start(void)
+{
+    if (xTaskCreate(console_task, "eye_console", TASK_STACK, NULL, TASK_PRIO, NULL) != pdPASS) {
+        return ESP_ERR_NO_MEM;
+    }
+    ESP_LOGI(TAG, "serial console ready — type !help");
+    return ESP_OK;
+}

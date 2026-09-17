@@ -24,22 +24,35 @@
            background:transparent; color:inherit; cursor:pointer; }
   button:hover { border-color:var(--accent); color:var(--accent); }
   button[aria-pressed=true] { border-color:var(--accent); color:var(--accent); font-weight:600; }
-  button.primary { background:var(--accent); border-color:var(--accent); color:white; }
-  button:disabled, input:disabled { opacity:.45; cursor:not-allowed; }
   .row { display:flex; gap:.4rem; flex-wrap:wrap; margin-top:.6rem; }
   table { width:100%; border-collapse:collapse; font-variant-numeric:tabular-nums; font-size:.85rem; }
   th,td { text-align:left; padding:.22rem .35rem; border-bottom:1px solid var(--line); }
   th { font-weight:500; color:var(--dim); font-size:.75rem; }
   td input { width:4.2rem; font:inherit; padding:.1rem .25rem; background:transparent;
              color:inherit; border:1px solid var(--line); border-radius:3px; }
-  input[type=text], input[type=password] { font:inherit; padding:.25rem .4rem; background:transparent;
-             color:inherit; border:1px solid var(--line); border-radius:3px; min-width:14rem; }
+  td input.us { width:3.4rem; }
+  /* Eight columns do not fit a phone; scroll the table rather than the page. */
+  .scroll { overflow-x:auto; }
+  .scroll table { min-width:34rem; }
   .warn { color:var(--accent); font-size:.8rem; }
+  /* Six animations have to stay readable on a phone at the bench, so let them
+     wrap into as many columns as fit rather than one long row. */
+  #anims { display:grid; grid-template-columns:repeat(auto-fill,minmax(9.5rem,1fr)); gap:.4rem; }
+  #anims button { display:flex; flex-direction:column; align-items:flex-start;
+                  gap:.15rem; text-align:left; }
+  #anims .d { color:var(--dim); font-size:.72rem; font-weight:400; }
+  .check { display:inline-flex; align-items:center; gap:.35rem; margin:0; }
+  .check span { min-width:0; }
+  select { font:inherit; padding:.25rem .4rem; background:transparent; color:inherit;
+           border:1px solid var(--line); border-radius:5px; }
+  #jognow, #servomsg { color:var(--dim); font-size:.8rem; align-self:center; }
+  .num { min-width:2.5rem; text-align:right; font-variant-numeric:tabular-nums; }
 </style>
 </head>
 <body>
 <h1>eyemech</h1>
 <div id="sub">connecting…</div>
+<p class="warn" id="apnote" hidden>On the recovery access point — no station network joined. Set one over the serial console with <code>!wifi scan</code> then <code>!wifi set &lt;ssid&gt; &lt;password&gt;</code>, which saves the network only if it actually connects.</p>
 
 <fieldset>
   <legend>Mode</legend>
@@ -52,42 +65,84 @@
 </fieldset>
 
 <fieldset>
+  <legend>Animations — returns to the previous mode when finished</legend>
+  <div id="anims"></div>
+  <div class="row">
+    <label class="check"><input type="checkbox" id="animloop"><span>Loop until stopped</span></label>
+    <button id="animstop" hidden>Stop after this cycle</button>
+  </div>
+</fieldset>
+
+<fieldset>
   <legend>Gaze — drag to look (switches to manual)</legend>
   <canvas id="pad"></canvas>
   <div class="row">
     <button id="blink">Blink</button>
     <button id="center">Centre</button>
     <button id="release">Release servos</button>
+    <button id="engage" hidden>Engage servos</button>
   </div>
+  <p class="warn" id="relnote" hidden>Released: outputs are off and latched. Nothing will move — including blinks — until you engage. Engaging moves the mechanism to neutral from wherever it sagged to.</p>
 </fieldset>
 
 <fieldset>
-  <legend>Lid trim — how wide the eyes open</legend>
-  <label><span>Openness</span><input type="range" id="trim" min="0" max="1" step="0.01" value="0.5"></label>
+  <legend>Lids</legend>
+  <label><span>Openness</span><input type="range" id="trim" min="0" max="1" step="0.01" value="0.5"><span class="num" id="trimval"></span></label>
+  <p class="warn">The two below are the character of the face, not a tweak: how hard
+  each lid pair follows vertical gaze. 0.80 upper and 0.40 lower is the reference.
+  Record a change you decide to keep in <code>docs/decisions.md</code>.</p>
+  <label><span>Upper track</span><input type="range" id="cu" min="0" max="1" step="0.05"><span class="num" id="cuval"></span></label>
+  <label><span>Lower track</span><input type="range" id="cl" min="0" max="1" step="0.05"><span class="num" id="clval"></span></label>
+  <div class="row"><button id="coeffref">Back to 0.80 / 0.40</button></div>
+</fieldset>
+
+<fieldset id="jogbox" hidden>
+  <legend>Jog — relative steps, for establishing direction</legend>
+  <p class="warn">After any mechanical change, take ONE step and watch which way the
+  linkage goes before jogging further. A lid rests against its closed stop, so the
+  closing direction has no headroom — and these servos have the torque to break a
+  printed part rather than stall.</p>
+  <div class="row">
+    <label class="check"><span>Servo</span><select id="jogservo"></select></label>
+    <label class="check"><span>Step</span><select id="jogstep">
+      <option value="2" selected>2°</option>
+      <option value="5">5°</option>
+      <option value="10">10°</option>
+    </select></label>
+  </div>
+  <div class="row">
+    <button id="jogminus">− step</button>
+    <button id="jogplus">+ step</button>
+    <span id="jognow"></span>
+  </div>
+  <div class="row">
+    <button id="markmin">Mark as min (closed)</button>
+    <button id="markmax">Mark as max (open)</button>
+  </div>
 </fieldset>
 
 <fieldset>
   <legend>Servos</legend>
-  <div class="row">
-    <button id="calibrate" class="primary">Calibration</button>
-    <button id="release2">Release servos</button>
-  </div>
   <p class="warn" id="calnote" hidden>Calibration mode: angle fields write directly to the servo. Small steps.</p>
-  <table>
-    <thead><tr><th>Ch</th><th>Servo</th><th>Angle</th><th>Min</th><th>Max</th><th>Trim µs</th></tr></thead>
-    <tbody id="servos"></tbody>
-  </table>
-  <div class="row"><button id="save">Save to NVS</button></div>
-</fieldset>
-
-<fieldset>
-  <legend>Network</legend>
-  <form id="wifi">
-    <label><span>SSID</span><input type="text" id="wifi_ssid" maxlength="32" autocomplete="off"></label>
-    <label><span>Password</span><input type="password" id="wifi_password" maxlength="64" autocomplete="current-password"></label>
-    <div class="row"><button type="submit">Save WiFi</button></div>
-    <p class="warn" id="wifinote" hidden></p>
-  </form>
+  <p class="warn">Min µs and Max µs are the pulse range the servo is driven with, not
+  a limit — changing them changes what every angle means, including the ones already
+  measured. A servo that only honours 1000–2000 µs under-travels silently, which shows
+  up as lids that never fully close.</p>
+  <div class="scroll">
+    <table>
+      <thead><tr><th>Ch</th><th>Servo</th><th>Angle</th><th>Min</th><th>Max</th>
+                 <th>Min µs</th><th>Max µs</th><th>Trim µs</th></tr></thead>
+      <tbody id="servos"></tbody>
+    </table>
+  </div>
+  <div class="row">
+    <button id="save">Save to NVS</button>
+    <button id="defaults">Reset to defaults…</button>
+    <label class="check"><input type="checkbox" id="safeboot"><span>Safe boot</span></label>
+    <span id="servomsg"></span>
+  </div>
+  <p class="warn" id="sbnote" hidden>Safe boot is OFF: the mechanism will drive to
+  neutral on its own at the next power-up, with nobody's hand near the supply.</p>
 </fieldset>
 
 <script>
@@ -143,31 +198,118 @@ document.querySelectorAll('#modes button').forEach(b =>
   b.onclick = () => post('/api/mode', { mode: b.dataset.mode }).then(refresh));
 document.getElementById('blink').onclick   = () => post('/api/blink');
 document.getElementById('release').onclick = () => post('/api/release');
-document.getElementById('release2').onclick = () => post('/api/release');
+document.getElementById('engage').onclick  = () => post('/api/engage');
 document.getElementById('save').onclick    = () => post('/api/save').then(refresh);
 document.getElementById('center').onclick  = () => { lr = ud = 90; drawPad(); post('/api/look', { lr, ud }); };
-document.getElementById('trim').oninput    = e => post('/api/lid_trim', { value: +e.target.value });
-document.getElementById('calibrate').onclick = () => post('/api/mode', { mode:'calibration' }).then(refresh);
-document.getElementById('wifi').onsubmit = async ev => {
-  ev.preventDefault();
-  const note = document.getElementById('wifinote');
-  note.hidden = false; note.textContent = 'saving WiFi and restarting...';
-  const ssid = document.getElementById('wifi_ssid').value.trim();
-  const password = document.getElementById('wifi_password').value;
-  const r = await post('/api/wifi', { ssid, password });
-  note.textContent = r.ok ? 'restarting...' : 'WiFi save failed';
+
+/* --- lids -------------------------------------------------------------- */
+/* The board is the source of truth for these — the trim comes back from NVS at
+   0.85, not the 0.5 the markup starts at — but do not yank a slider out from
+   under the finger that is dragging it. */
+function syncSlider(id, v) {
+  const el = document.getElementById(id);
+  if (document.activeElement !== el && Number.isFinite(v)) el.value = v;
+  document.getElementById(id + 'val').textContent = (+el.value).toFixed(2);
+}
+
+const postCoeff = () => post('/api/lid_coeff', {
+  upper: +document.getElementById('cu').value,
+  lower: +document.getElementById('cl').value });
+
+document.getElementById('trim').oninput = e => {
+  document.getElementById('trimval').textContent = (+e.target.value).toFixed(2);
+  post('/api/lid_trim', { value: +e.target.value });
+};
+['cu', 'cl'].forEach(id => document.getElementById(id).oninput = e => {
+  document.getElementById(id + 'val').textContent = (+e.target.value).toFixed(2);
+  postCoeff();
+});
+document.getElementById('coeffref').onclick = () => {
+  document.getElementById('cu').value = 0.8;
+  document.getElementById('cl').value = 0.4;
+  postCoeff().then(refresh);
+};
+
+/* --- animations -------------------------------------------------------- */
+const animBox = document.getElementById('anims');
+document.getElementById('animstop').onclick = () => post('/api/anim/stop').then(refresh);
+
+function renderAnims() {
+  /* The list is compiled in, so build the buttons once and then only restyle
+     them — rebuilding every second would fight the pointer. */
+  if (animBox.childElementCount === state.anims.length) return;
+  animBox.innerHTML = state.anims.map(a =>
+    `<button data-anim="${a.name}"><span>${a.name.replace(/_/g, ' ')}</span>` +
+    `<span class="d">${a.desc}</span></button>`).join('');
+  animBox.querySelectorAll('button').forEach(b => b.onclick = () =>
+    post('/api/anim', { name: b.dataset.anim,
+                        repeat: document.getElementById('animloop').checked ? -1 : 1 })
+      .then(refresh));
+}
+
+/* --- jog and mark ------------------------------------------------------ */
+const jogBox = document.getElementById('jogbox');
+const jogNow = document.getElementById('jognow');
+const jogSel = document.getElementById('jogservo');
+
+function fillJogServos() {
+  if (jogSel.childElementCount === state.servos.length) return;
+  jogSel.innerHTML = state.servos.map(s => `<option>${s.name}</option>`).join('');
+}
+
+/* Every one of these can be refused — wrong mode, or a servo whose position is
+   unknown because nothing has commanded it yet — so report what came back
+   rather than assuming it moved. */
+async function calPost(path, body, describe) {
+  const r = await post(path, { servo: jogSel.value, ...body });
+  let d = {};
+  try { d = await r.json(); } catch (e) { /* no body */ }
+  jogNow.textContent = r.ok ? describe(d) : (d.error || `refused (${r.status})`);
+  refresh();
+}
+
+const jogStep = () => +document.getElementById('jogstep').value;
+document.getElementById('jogminus').onclick = () =>
+  calPost('/api/jog', { delta: -jogStep() }, d => `${jogSel.value} → ${d.angle.toFixed(1)}°`);
+document.getElementById('jogplus').onclick = () =>
+  calPost('/api/jog', { delta:  jogStep() }, d => `${jogSel.value} → ${d.angle.toFixed(1)}°`);
+document.getElementById('markmin').onclick = () =>
+  calPost('/api/mark', { end: 'min' }, d => `${jogSel.value} min = ${d.min.toFixed(1)}° — Save to keep`);
+document.getElementById('markmax').onclick = () =>
+  calPost('/api/mark', { end: 'max' }, d => `${jogSel.value} max = ${d.max.toFixed(1)}° — Save to keep`);
+
+/* --- safe boot and defaults -------------------------------------------- */
+const servoMsg = document.getElementById('servomsg');
+
+/* Persisted the instant it changes, unlike the rest of this page. */
+document.getElementById('safeboot').onchange = e =>
+  post('/api/safeboot', { on: e.target.checked }).then(refresh);
+
+document.getElementById('defaults').onclick = async () => {
+  if (!confirm('Discard every measured limit and pulse range, back to the built-in '
+             + 'defaults?\n\nNothing is written to NVS until you press Save, so a '
+             + 'reboot undoes this.')) return;
+  const r = await post('/api/defaults', { confirm: 'defaults' });
+  let d = {};
+  try { d = await r.json(); } catch (e) { /* no body */ }
+  servoMsg.textContent = r.ok
+    ? 'back to defaults — not saved; reboot undoes it, Save keeps it'
+    : (d.error || `refused (${r.status})`);
+  dirty = false;
+  refresh();
 };
 
 /* --- servo table ------------------------------------------------------- */
 function rowHtml(s) {
   const a = Number.isFinite(s.angle) ? s.angle.toFixed(1) : '—';
-  const angleDisabled = state.mode === 'calibration' ? '' : ' disabled';
   return `<tr data-servo="${s.name}">
     <td>${s.channel}</td><td>${s.name}</td>
-    <td><input data-f="angle" value="${a}"${angleDisabled}></td>
+    <td><input data-f="angle" value="${a}"></td>
     <td><input data-f="min" value="${s.min}"></td>
     <td><input data-f="max" value="${s.max}"></td>
-    <td><input data-f="trim_us" value="${s.trim_us}"></td></tr>`;
+    <td><input class="us" data-f="min_us" value="${s.min_us}"></td>
+    <td><input class="us" data-f="max_us" value="${s.max_us}"></td>
+    <td><input class="us" data-f="trim_us" value="${s.trim_us}"></td></tr>`;
 }
 
 document.getElementById('servos').addEventListener('focusin', () => dirty = true);
@@ -175,24 +317,42 @@ document.getElementById('servos').addEventListener('change', ev => {
   const tr = ev.target.closest('tr'), servo = tr.dataset.servo;
   const f = ev.target.dataset.f, v = parseFloat(ev.target.value);
   if (!Number.isFinite(v)) return;
-  if (f === 'angle')        post('/api/servo',  { servo, angle: v });
-  else if (f === 'trim_us') post('/api/cfg',    { servo, trim_us: v });
-  else                      post('/api/limits', { servo, [f]: v });
+  const p = f === 'angle'     ? post('/api/servo',  { servo, angle: v })
+          : f.endsWith('_us') ? post('/api/cfg',    { servo, [f]: v })
+          :                     post('/api/limits', { servo, [f]: v });
   dirty = false;
+  /* eye_servo_set_cfg() rejects a pulse range outside 300..3000 or inverted,
+     and the field would otherwise sit there showing a value the board never
+     took. Pull the real one back. */
+  p.then(r => { if (!r.ok) refresh(); });
 });
 
 async function refresh() {
   try {
     state = await (await fetch('/api/state')).json();
     document.getElementById('sub').textContent =
-      `${state.board} · ${state.mode} · ${state.wifi_mode} ${state.wifi_ssid} · vision ${state.vision ? 'detected' : 'absent'}`;
+      `${state.board} · ${state.mode} · vision ${state.vision ? 'detected' : 'absent'}`
+      + (state.ssid ? ` · ${state.link === 'ap' ? 'AP' : state.ssid} ${state.ip || ''}` : '');
+    document.getElementById('apnote').hidden = state.link !== 'ap';
     document.querySelectorAll('#modes button').forEach(b =>
       b.setAttribute('aria-pressed', b.dataset.mode === state.mode));
     document.getElementById('calnote').hidden = state.mode !== 'calibration';
-    document.getElementById('calibrate').setAttribute('aria-pressed', state.mode === 'calibration');
-    if (!document.getElementById('wifi_ssid').value) {
-      document.getElementById('wifi_ssid').placeholder = state.wifi_ssid || 'network name';
-    }
+    jogBox.hidden = state.mode !== 'calibration';   /* the API refuses anyway */
+    fillJogServos();
+    const sb = document.getElementById('safeboot');
+    if (document.activeElement !== sb) sb.checked = !!state.safe_boot;
+    document.getElementById('sbnote').hidden = !!state.safe_boot;
+    syncSlider('trim', state.lid_trim);
+    syncSlider('cu', state.coeff_upper);
+    syncSlider('cl', state.coeff_lower);
+    renderAnims();
+    animBox.querySelectorAll('button').forEach(b =>
+      b.setAttribute('aria-pressed', b.dataset.anim === state.anim));
+    document.getElementById('animstop').hidden = !state.anim;
+    // A latched release is only escapable from here, so the button has to swap.
+    document.getElementById('relnote').hidden  = !state.released;
+    document.getElementById('engage').hidden   = !state.released;
+    document.getElementById('release').hidden  = !!state.released;
     if (state.mode !== 'manual') { lr = state.lr; ud = state.ud; }
     if (!dirty) document.getElementById('servos').innerHTML = state.servos.map(rowHtml).join('');
     drawPad();

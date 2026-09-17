@@ -8,18 +8,30 @@ the board with the PlatformIO environment: `xiao_esp32c6` or `xiao_esp32s3`.
 
 ## Network setup
 
-The C port first tries saved WiFi credentials from NVS, then the optional
-defaults in `components/eye_web/include/secrets.h`. If it cannot connect, it
-starts an open setup access point:
+WiFi is `eye_net`'s job. The board keeps up to four station profiles in NVS and
+sweeps them at boot; the first that reaches an IP becomes the default. The
+**recovery access point is always up**, in every station state:
 
-| Setup AP | Value |
+| Recovery AP | Value |
 |---|---|
 | SSID | `eyemech-setup` |
-| URL | `http://192.168.4.1/` |
+| Password | `CONFIG_EYE_NET_AP_PASSWORD` — set it in menuconfig; the default is public |
+| URL | `http://192.168.9.1/` |
 
-Connect a phone or laptop to `eyemech-setup`, open the URL, enter your local
-SSID/password in the Network section, and save. The board stores those
-credentials in NVS and reboots onto your local network.
+It sits on 192.168.9.1, not 192.168.4.1, because the bench LAN is 192.168.4.0/22
+and the two collided.
+
+On a first boot, or on a new network, join over the USB serial console:
+
+```
+!wifi scan
+!wifi set "Some Network" thepassword
+```
+
+`!wifi set` tries the credentials live and saves them only if the station gets an
+IP. The board then answers as `eyemech.local` over mDNS. See
+[OPERATION.md](OPERATION.md#network) for profiles, eviction and the sweep.
+Setting WiFi from the control page is not in this build yet.
 
 ## XIAO physical wiring
 
@@ -39,13 +51,40 @@ between boards.
 | D7 (RX) | Grove Vision **TX** |
 | D8 | Free |
 | D9 | Free |
-| D10 | PCA9685 `/OE` |
+| D10 | PCA9685 `/OE` (optional; not wired on this build — see below) |
 | 3V3 | PCA9685 VCC, Grove Vision VCC |
 | GND | Common ground (mandatory — see below) |
 
 The pots, switches and buttons from the MicroPython C6 build are gone in the C
 port; the browser control surface replaced them. D0-D3, D8 and D9 are free on
 both boards.
+
+### MicroPython original on the C6
+
+The reference build in `micropython/` still uses the pots and switches, on these
+pins. This table is for running that build, not the C port.
+
+| XIAO | GPIO | Connects to |
+|---|---|---|
+| D0 / A0 | 0 | UD pot wiper |
+| D1 / A1 | 1 | Trim pot wiper |
+| D2 / A2 | 2 | LR pot wiper |
+| D3 | 21 | Enable switch → GND |
+| D4 (SDA) | 22 | PCA9685 SDA |
+| D5 (SCL) | 23 | PCA9685 SCL |
+| D6 (TX) | 16 | Grove Vision **RX** |
+| D7 (RX) | 17 | Grove Vision **TX** |
+| D8 | 19 | Mode switch → GND |
+| D9 | 20 | Blink button → GND |
+| D10 | 18 | PCA9685 `/OE` (optional — emergency release only) |
+| 3V3 | — | PCA9685 VCC, pot high sides, Grove Vision VCC |
+| GND | — | Common ground (mandatory — see below) |
+
+All switches and buttons use internal pull-ups and switch to ground. No
+external resistors needed on those.
+
+Only GPIO0/1/2 are ADC-capable on this board, so the three pots are
+locked to D0/D1/D2. Everything else is placed around them.
 
 ## Board GPIO maps
 
@@ -65,7 +104,7 @@ the PlatformIO environment; use `xiao_esp32c6` or `xiao_esp32s3` instead.
 | D7 (RX) | 17 | 44 | Grove Vision **TX** |
 | D8 | 19 | 7 | Free |
 | D9 | 20 | 8 | Free |
-| D10 | 18 | 9 | PCA9685 `/OE` |
+| D10 | 18 | 9 | PCA9685 `/OE` (optional) |
 
 The XIAO user LED also differs: C6 uses GPIO15, S3 uses GPIO21. It is active
 low on both boards and is handled in firmware only.
@@ -83,16 +122,43 @@ low on both boards and is handled in firmware only.
 
 Channels 6–15 are free.
 
-## The `/OE` pull-up — do not skip this
+## The `/OE` pull-down
 
-Fit a **10k resistor from `/OE` to 3V3**.
+This build has a **10k resistor from `/OE` to GND**. Note that this is a
+pull-DOWN, the opposite of what earlier revisions of this document (and
+`micropython/main.py`) called for.
 
-`/OE` is active low. During the ESP32's bootloader window, the `/OE` GPIO
-floats; the pull-up holds `/OE` high, so the PCA9685's outputs stay Hi-Z and the
-servos stay limp. The firmware drives it low only after `neutral()` has loaded
-sane positions into every channel. Without the resistor you get a full-speed
-slam through the linkages at every reset, which is how eye mechanisms lose teeth
-off their gears.
+`/OE` is active low, so a pull-down means **outputs are enabled by default**,
+including through the entire boot window. Most Adafruit-pattern PCA9685
+breakouts already carry an onboard pull-down for exactly this reason, so the
+pin works when left unconnected. Do **not** also fit a pull-up to 3V3: against
+an onboard pull-down it forms a divider that puts `/OE` near 1.65 V, between the
+chip's V_IL max (~0.99 V) and V_IH min (~2.31 V), which is an indeterminate
+input and an intermittent fault.
+
+What this means at reset:
+
+- **Cold power-on.** The PCA9685's own power-on reset zeroes the `LEDn`
+  registers and sets `SLEEP`. No pulses are generated regardless of `/OE`, so
+  the servos are limp.
+- **Warm reset.** The ESP32 reboots; the PCA9685 does not. It keeps its
+  registers and keeps emitting the last commanded pulses, so the servos hold
+  position rather than going limp.
+
+Neither case slams. The slam comes from firmware writing 90° into all six
+channels at once, and no `/OE` state prevents that — see the bring-up order
+below.
+
+Because the resistor is 10k rather than a hard tie, D10 can safely drive `/OE`
+high (about 0.33 mA through the resistor). That is worth wiring: it gives an
+instant, asynchronous release that needs no I²C transaction, so it still works
+when the bus is wedged or the firmware has crashed. It is the only stop that
+survives a dead MCU.
+
+Note that with `MODE2` set to `OUTDRV=1, OUTNE=00` — what `pca9685.c` writes —
+disabled outputs are driven **low**, not high-impedance. Low is the right choice
+for servos: a constant low is simply no pulse, where a floating line could pick
+up noise the servos read as one.
 
 ## Power
 
@@ -113,6 +179,40 @@ gets there fast.
 - SG90-class: 5 V, 3 A minimum
 - MG90S-class: 6 V, 4–5 A
 
+**Lid arms come in A and B variants.** The part that couples the lid linkage to
+the servo horn is printed in two sizes to suit different horn dimensions, and the
+design includes a printed measuring card for working out which one you need.
+Measure the horn against the card and print the matching variant — a reprinted
+arm is not interchangeable if the horn differs. Worth checking before printing a
+spare, since the arm is the part that has failed here.
+
+**Do not use threadlocker or CA glue on the printed linkage parts.** Loctite-type
+anaerobic threadlockers contain methacrylate esters that attack many
+thermoplastics, and cyanoacrylate crazes others; both cause stress cracking that
+shows up at exactly the loaded joints you were trying to secure. A set of
+linkage joints was lost this way on 2026-09-05. Use mechanical retention
+instead — nylon-insert nuts, a captive nut, or a friction fit — and if a
+fastener must be secured, secure it against a metal part rather than the print.
+
+**Print lid arms at 0.20 mm layer height in a strength preset.** These are small
+parts under repeated load from a metal-geared servo with no stall detection, so
+layer adhesion matters more than surface finish. The arm that broke was the
+weakest link in the whole mechanism.
+
+**Bring-up rule learned the hard way:** after fitting or refitting a horn, move
+the servo by a *single 2° step* and confirm which way the lid travels before
+jogging further. Direction is not predictable from the horn's appearance, and the
+closing direction has no spare travel — the lid is already against something. A
+lid arm was broken on 2026-09-05 by three 10° steps taken in the closing
+direction on that assumption.
+
+**This build uses MG90S**, so size for the 6 V, 4–5 A figure. Note what metal
+gears change about failure: an MG90S pushed into a hard stop does not strip
+its gearset the way an SG90 does — it keeps pushing, and what gives instead is
+the servo horn, the linkage, or the printed part it is bolted to. The gearbox
+surviving is not the same as the mechanism surviving, so the "small steps, stop
+at the first sign of binding" rule matters *more* here, not less.
+
 Put a **1000 µF electrolytic across `V+` and `GND` at the PCA9685
 itself**, not back at the supply. Servo current transients are fast and
 the wiring inductance between supply and board will otherwise show up as
@@ -124,35 +224,29 @@ PWM signal has no reference and servos twitch, buzz, or ignore commands.
 
 ## First bring-up, in order
 
-1. Power the logic only. Confirm the PCA9685 answers on I2C:
-   - C6 MicroPython check:
-     `I2C(0, sda=Pin(22), scl=Pin(23), freq=400_000).scan()`
-   - S3 MicroPython check:
-     `I2C(0, sda=Pin(5), scl=Pin(6), freq=400_000).scan()`
-   Both should return `[64]` (0x40).
-2. Servo supply on, `/OE` still high. Nothing should move.
-3. Open the control page. If your local WiFi is not configured yet, connect to
-   `eyemech-setup` and use `http://192.168.4.1/`.
-4. One servo on channel 0. Enter calibration mode and confirm it centres. In the
-   MicroPython original, run `main.py` with the mode switch held. In the C port,
-   use the browser control page or `tools/eyectl.py`.
+1. Power the logic only. Confirm the PCA9685 answers on I2C at 0x40: `!status`
+   over the serial console reports it. For the MicroPython original:
+   - C6: `I2C(0, sda=Pin(22), scl=Pin(23), freq=400_000).scan()`
+   - S3: `I2C(0, sda=Pin(5), scl=Pin(6), freq=400_000).scan()`
+
+   Both should return `[64]`.
+2. Servo supply on. Nothing should move: on a cold start the PCA9685 generates no
+   pulses until something writes to it, and safe boot keeps every channel released.
+3. Open the control page at `http://eyemech.local/`, or join `eyemech-setup` and
+   use `http://192.168.9.1/` if no network is configured yet.
+4. One servo on channel 0, one step at a time. The full procedure, including the
+   one-2°-step rule after any mechanical change, is in
+   [CALIBRATION.md](CALIBRATION.md).
 5. Fit horns and linkages with everything at 90°, then add the rest.
 
 ## Calibration you still have to do
 
-**Pot endpoints, MicroPython original only.** Every ADC constant from the Pico
-version is void — ESP32 ADC is a different animal, and it's nonlinear even with
-`ATTN_11DB`. From the REPL:
-
-```python
-import main
-main.calibrate_pots()
-```
-
-Sweep each pot end to end, note the extremes, and edit `POT_MIN`,
-`POT_MAX`, `TRIM_MIN`, `TRIM_MAX` at the top of `main.py`. The original
-trim range of 7000–14500 was already saturating against its own clamp on
-the Pico, so don't carry those numbers over.
+**Pot endpoints — MicroPython only.** The C port has no pots; `eye_web`
+replaced them. This applies solely to running `micropython/main.py`: sweep each
+pot end to end from the REPL with `main.calibrate_pots()`, then edit `POT_MIN`,
+`POT_MAX`, `TRIM_MIN`, `TRIM_MAX` at the top of `main.py`. The original trim
+range of 7000–14500 was already saturating against its own clamp on the Pico, so
+don't carry those numbers over.
 
 **PCA9685 oscillator.** Clone boards routinely ship with an oscillator
 anywhere from 24 to 27 MHz instead of 25. If servos sit consistently off

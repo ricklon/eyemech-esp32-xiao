@@ -1,0 +1,4 @@
+## mDNS so the board answers to eyemech.local, which is what tools/eyectl.py
+## defaults to. Not in ESP-IDF core; ships from the component registry.
+dependencies:
+  espressif/mdns: "^1.2.0"

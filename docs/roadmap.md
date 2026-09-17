@@ -5,12 +5,40 @@
 - [x] Repo restructured: MicroPython original preserved as reference
 - [x] `pca9685`, `eye_servo`, `eye_motion`, `eye_vision`, `eye_web` scaffolded
 - [x] Board abstraction so C6 and S3 both build
-- [ ] **First build.** Expect include-path and IDF API drift — `i2c_master.h`
-      needs IDF ≥ 5.2; if PlatformIO's toolchain is older, either pin a newer
-      platform version or fall back to the legacy `driver/i2c.h`
-- [ ] Bench test: PCA9685 answers on I²C at 0x40, `/OE` holds servos limp
-- [ ] One servo on channel 0, unloaded, centres on command
-- [ ] All six servos, calibrate limits from the control page, save to NVS
+- [x] **First build.** Both boards, ESP-IDF 5.5.1 via PlatformIO
+- [x] Bench test: PCA9685 answers on I²C at 0x40 (S3, servo rail off)
+- [x] Serial console, WiFi profile sweep, AP fallback, mDNS, NVS round-trip
+- [x] Warm-boot position recovery from the PCA9685 registers
+- [x] `/OE`: **D10 is not wired.** The pull-down holds outputs enabled, so
+      `!release` works entirely through the I²C `all_off()` path. There is no
+      hardware stop; the servo rail switch is the emergency stop
+- [x] Servo rail powered on an assembled mechanism with every channel released
+      — nothing moved, confirming the outputs really are gated
+- [x] LR (channel 0) centres on command and holds quietly
+- [x] **LR calibrated: 40 / 140, matching the reference table**, measured by
+      jogging to each end on the real linkage. Saved to NVS
+- [x] **UD calibrated: 42 / 138.** Bottom is a real hard stop at 40, backed off
+      2°. Top was still free past 150, but capped at 138 to keep level gaze at
+      `progress` 0.5 — see docs/decisions.md
+- [x] Servos identified: **MG90S**
+- [x] **TL calibrated: 128 / 20.** Mirrored on this build, unlike the reference
+      — so three lids run backwards here, not two. Closed is 128, not the
+      table's 90; see docs/decisions.md
+- [x] **BL calibrated: 40 / 170**, conventional — the reference has it inverted.
+      Closed is where it meets the top lid, found with TL held closed
+- [x] **TR calibrated: 89 / 165.** Closed hunted from above rather than assumed;
+      first lid to come out with a clean 76° arc inside the servo's travel
+- [x] BL open end: **160**. BR open end: **20**. Both closed at 90
+- [x] TL lid arm reprinted and refitted, horn seated at closed-90 first
+- [x] **All six axes calibrated and saved** (rebuild of 2026-09-05): LR 42/138,
+      UD 40/140, TL 90/13, BL 93/172, TR 90/172, BR 90/15 — see
+      docs/CALIBRATION.md. Supersedes the first attempt's values, void after the
+      Loctite damage and rebuild
+- [x] Every lid's closed end hunted rather than assumed; not one was at the
+      nominal 90, the worst 12° out
+- [ ] `!safeboot off` and the first full run in auto mode
+- [ ] Side-by-side against the MicroPython build: same motion, same blink feel
+- [ ] `!safeboot off` once all six are calibrated
 - [ ] Side-by-side against the MicroPython build: same motion, same blink feel
 
 ## M2 — Behavior parity and beyond
@@ -27,6 +55,18 @@
       (listening / thinking / speaking) rather than by a camera
 - [ ] A command protocol for that — WebSocket or MQTT
 - [ ] OTA updates, so the mechanism doesn't need disassembly to reflash
+
+## Open on hardware
+
+- The S3 is the board with bench time. The C6 builds but has not been run.
+- LR's reference limits proved correct on the real linkage, which is decent
+  evidence the rest of the table is a sound starting point rather than a guess.
+  It is not evidence that any *other* axis is right.
+- Servo type is still unrecorded (SG90 vs MG90S changes pulse range and supply
+  sizing), and `min_us`/`max_us` are still the 500–2500 defaults — untested,
+  since LR reached both reference endpoints without needing them widened.
+- `pca9685_trim_oscillator()` is still dead code: the oscillator has not been
+  measured, and there is no way to apply a measurement without a reflash.
 
 ## Deferred
 

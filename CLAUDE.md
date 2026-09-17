@@ -14,8 +14,24 @@ implementation** — when the C behaves differently from those three files, the
 Python is right and the C is wrong, unless a deliberate change is recorded in
 `docs/decisions.md`. Do not edit `micropython/` to make the C look correct.
 
-**Status: port scaffolded, never compiled, never run.** Expect the first build to
-fail on include paths and IDF API drift. That is the first job, not a surprise.
+**Status: running on a XIAO ESP32-S3, calibrated, and moving.** Boot, I²C to
+the PCA9685 at 0x40, the register readback, NVS save/load, the serial console,
+the WiFi profile sweep, the AP fallback and mDNS are bench-verified. All six
+axes have been driven under power and remeasured after the rebuild — LR 42/138,
+UD 40/140, TL 90/13, BL 93/172, TR 90/172, BR 90/15, recorded in `af314e3` — and
+the animations have been run and tuned on the mechanism (`a9899d7`). Joining a
+network by name and the console keystroke echo are verified on hardware too. The
+control page is the surface actually in use.
+
+**Those measured limits live in NVS, not in the source.** The defaults table in
+`eye_servo.c` is still Will Cogley's, so a board with erased NVS starts from his
+linkage geometry rather than this mechanism's. Erasing NVS means recalibrating
+before anything is driven, and the safe-boot flag exists for exactly that
+window.
+
+Still unproven: the PCA9685 oscillator has never been scoped, and the per-servo
+pulse range is still the 500–2500 µs default. The C6 builds but has had no bench
+time.
 
 ## The port's three deliberate changes
 
@@ -27,7 +43,8 @@ Everything else is meant to be behavior-identical to the Python.
    GPIO number outside that file.
 2. **The pots and switches are gone.** Three ADC pots, an enable switch, a mode
    switch and a blink button were the MicroPython control surface. `eye_web`
-   replaces all of them over WiFi. D0–D3, D8 and D9 are now free on both boards.
+   replaces all of them over WiFi, and `eye_console` over the USB cable. D0–D3,
+   D8 and D9 are now free on both boards.
 3. **Calibration persists.** The MicroPython build reflashed to change
    `servo_limits`; the C port stores limits and per-servo pulse config in NVS
    under namespace `eyemech`, editable from the control page.
@@ -41,9 +58,14 @@ pio device monitor                      # 115200
 pio run -e xiao_esp32c6 -t menuconfig   # promote keepers to sdkconfig.defaults
 ```
 
-Before the first build, copy `components/eye_web/include/secrets.h.example` to
-`secrets.h` beside it and fill in WiFi credentials. That file is gitignored —
-never commit it, never paste its contents into a commit message or a doc.
+WiFi credentials are no longer compiled in — `secrets.h` is gone. Set them at
+runtime over the serial console (`!wifi set <ssid> <password>`), which joins the
+network and writes it to NVS only if it works. The four profiles are a FIFO, so
+no slot number is involved; `!wifi set <n> <ssid> <password>` still writes a
+specific slot without testing it. `pio run -t menuconfig` → *eyemech networking*
+can seed profile 1 for a first boot; that lands in the gitignored `sdkconfig`,
+never in `sdkconfig.defaults`. Never paste credentials into a commit message or
+a doc.
 
 `sdkconfig*` is generated and gitignored; `sdkconfig.defaults` is the checked-in
 source of truth.
@@ -57,7 +79,9 @@ components/pca9685/       port of micropython/pca9685.py, plus /OE control
 components/eye_servo/     port of micropython/servo.py + the servo_limits table
 components/eye_motion/    port of main.py's primitives and mode machine
 components/eye_vision/    port of main.py's Comms class (Grove Vision over UART)
-components/eye_web/       WiFi + HTTP control page; replaces the pots
+components/eye_net/       WiFi: permanent recovery AP + 4 NVS station profiles
+components/eye_web/       HTTP control page; replaces the pots
+components/eye_console/   serial control; the surface that works without WiFi
 micropython/              THE ORIGINAL — reference, not dead code
 docs/WIRING.md            pin map, power, bring-up order, calibration procedure
 docs/PORTING.md           function-by-function map from Python to C
@@ -66,21 +90,55 @@ tools/eyectl.py           drive the HTTP API from a shell
 
 ## Things that will bite you
 
-**`servo_limits` entries can run backwards.** `BL` and `TR` are `(90, 10)` —
-max is numerically smaller than min, because those two lid servos are mounted
-mirrored relative to their partners. Any code that clamps against these must
-handle either ordering; `eye_motion.c` does it with `fminf`/`fmaxf`. Never
-"fix" the table by swapping the values.
+**`servo_limits` entries can run backwards**, and *which* entries changes.
+In the compiled defaults it is `BL` and `TR` at `(90, 10)` — max numerically
+smaller than min. On the rebuilt mechanism it is the other pair: the measured
+limits in NVS have `TL` at `(90, 13)` and `BR` at `(90, 15)` running backwards
+while `BL` and `TR` run forwards (`af314e3`: TL and BR open downward). Which
+pair is inverted depends on how the horns went back on, so never assume it from
+either table. Any code that clamps against these must handle either ordering;
+`eye_motion.c` does it with `fminf`/`fmaxf`. Never "fix" a table by swapping
+the values — that just moves the inversion somewhere less obvious.
 
-**The `/OE` ordering in `app_main()` is load-bearing.** `/OE` is active low and
-must stay high until every channel holds a position. A 10k pull-up to 3V3 covers
-the bootloader window when the GPIO floats. Without both, the servos slam
-through their linkages at every reset, which is how eye mechanisms lose teeth
-off their gears.
+**`/OE` has a 10k pull-DOWN to GND on this build, not a pull-up.** Outputs are
+therefore enabled by default, through the whole boot window. On a cold start the
+PCA9685's own power-on reset zeroes the `LEDn` registers and sets `SLEEP`, so
+there are no pulses and the servos are limp anyway. On a warm reset the ESP32
+reboots but the PCA9685 does not: it retains its registers and keeps emitting the
+last pulses, so the servos *hold* rather than going limp.
+
+`/OE` was never what prevented the slam. The slam comes from `eye_motion_neutral()`
+writing 90 degrees into all six channels at once, and no `/OE` state stops that.
+Recovering the last commanded position from the `LEDn_OFF` registers and ramping
+to neutral is what stops it — those registers are the only position memory that
+exists, because these servos have no feedback.
+
+What `/OE` is good for is the emergency release: driving D10 high makes every
+output go low instantly, with no I2C transaction, so it still works when the bus
+is wedged or the firmware has crashed. Driving high is safe against the 10k
+pull-down. Do not gate the boot sequence with it — disabling outputs before
+seeding positions makes the servos sag and then snap back.
 
 **`eye_servo_write()` skips redundant writes.** The motion loop rewrites
 identical lid targets constantly and I²C is the bottleneck; the skip is worth
 roughly an order of magnitude in loop rate. Don't remove it.
+
+**On USB-Serial-JTAG, `fflush()` is not enough to get a character out.** The
+console runs on that peripheral with no VFS driver installed, and in that mode
+IDF only raises the TX FIFO's flush bit on a `'\n'`. `fflush()` moves the byte
+into the FIFO and leaves it there, so anything printed mid-line — a keystroke
+echo, a progress dot — is invisible until a newline flushes the whole line at
+once. `fsync(fileno(stdout))` is what actually flushes; `eye_console` wraps the
+pair as `push_stdout()`.
+
+**`esp_wifi_disconnect()` does not take effect before the next line of C.**
+Setting a station config while an association is in flight is refused (*"sta is
+connecting"*), and `esp_wifi_connect()` while a link is still up is ignored
+(*"sta is connected, disconnect before connecting to new ap"*). The second one
+is silent and dangerous: the old network stays connected, its next IP event
+arrives, and untested credentials look like they worked. `sta_connect()` polls
+`esp_wifi_sta_get_ap_info()` until the radio agrees it is down before
+reconfiguring. Do not replace that with a fixed delay.
 
 **Timing is wall-clock, not loop counts.** The original's
 `random.randrange(20000)` blink interval was tied to the Pico's loop rate and
@@ -100,10 +158,15 @@ Do not invent these, and do not carry anything over from the Pico version.
 2. **Per-servo pulse range** — `eye_servo` defaults to 500–2500 µs. Servos that
    only honour 1000–2000 µs under-travel silently, which shows up here as lids
    that never fully close.
-3. **`servo_limits` per axis** — the checked-in values are Will Cogley's and
-   assume his linkage geometry.
-4. **Which servos are actually fitted** — SG90 vs MG90S changes both the pulse
-   range and the supply sizing (see `docs/WIRING.md`).
+3. ~~**`servo_limits` per axis**~~ — **measured on this mechanism 2026-09-05**
+   and recorded in `af314e3`. The values are in NVS; the defaults compiled into
+   `eye_servo.c` are still Will Cogley's, so this only holds for a board whose
+   NVS has not been erased. Seat every horn at closed-90 before remeasuring —
+   measuring as-found horns is what broke a lid arm.
+4. ~~**Which servos are actually fitted**~~ — **MG90S**, confirmed at the bench
+   2026-09-05. Size the supply for 6 V / 4–5 A. Metal gears do not strip the way
+   SG90s do; an MG90S driven into a stop keeps pushing until the horn, linkage
+   or printed part fails instead, so binding is *more* costly here, not less.
 
 The pot endpoints the MicroPython build needed are no longer relevant: the pots
 are gone.
@@ -111,9 +174,27 @@ are gone.
 ## Safety
 
 A servo driven past a mechanical stop stalls, heats and strips its gears within
-seconds. Bringing up a new axis: one servo at a time, unloaded first, small
-steps, hand near the supply switch. `POST /api/release` or driving `/OE` high is
-the fast way to make everything go limp.
+seconds, and these servos have **no feedback** — nothing reports position, load
+or current, so there is no stall detection and the only sensor is you watching
+the linkage. Bringing up a new axis: one servo at a time, unloaded first, small
+steps, hand near the supply switch.
+
+**After any mechanical change, establish direction with ONE 2° step before
+jogging.** A lid sits against its closed stop by definition, so the closing
+direction has zero headroom — unlike a gaze axis, which has travel either side of
+centre. Jogging a lid 10° the wrong way is 10° into the eye or the frame, and
+MG90S have the torque to break a printed part rather than stall. A lid arm was
+broken exactly this way on 2026-09-05: horns were refitted, TL was jogged +10
+three times on the assumption that + opened, and + was closing.
+
+`!release` on the serial console is the fast way to make everything go limp, and
+it is the one that does not need the network. `POST /api/release` does the same
+over HTTP. Both latch — nothing moves again, blinks included, until `!engage`.
+
+Calibration is command-and-confirm, never capture-and-record: the firmware
+commands a position and a human confirms it. Do not carry the calibration flow
+over from `~/Projects/lerobot` — those Feetech servos report position and these
+do not.
 
 ## Working style
 

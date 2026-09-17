@@ -5,6 +5,7 @@
 #include <string.h>
 #include "driver/uart.h"
 #include "esp_check.h"
+#include "esp_intr_alloc.h"
 #include "esp_log.h"
 #include "freertos/FreeRTOS.h"
 #include "freertos/task.h"
@@ -34,7 +35,12 @@ esp_err_t eye_vision_init(void)
         .flow_ctrl = UART_HW_FLOWCTRL_DISABLE,
         .source_clk = UART_SCLK_DEFAULT,
     };
-    ESP_RETURN_ON_ERROR(uart_driver_install(BOARD_GROVE_UART, UART_RX_BUF, 0, 0, NULL, 0),
+    /* ESP_INTR_FLAG_IRAM must be requested here to match
+     * CONFIG_UART_ISR_IN_IRAM in sdkconfig.defaults. Without it IDF logs
+     * "flag not set while CONFIG_UART_ISR_IN_IRAM is enabled, flag updated"
+     * on every boot and patches it after the fact. */
+    ESP_RETURN_ON_ERROR(uart_driver_install(BOARD_GROVE_UART, UART_RX_BUF, 0, 0, NULL,
+                                            ESP_INTR_FLAG_IRAM),
                         TAG, "uart install");
     ESP_RETURN_ON_ERROR(uart_param_config(BOARD_GROVE_UART, &cfg), TAG, "uart config");
     ESP_RETURN_ON_ERROR(uart_set_pin(BOARD_GROVE_UART, BOARD_PIN_GROVE_TX, BOARD_PIN_GROVE_RX,

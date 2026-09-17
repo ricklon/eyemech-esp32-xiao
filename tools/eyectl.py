@@ -2,6 +2,7 @@
 """eyectl -- drive the eyemech HTTP API from the command line.
 
     python tools/eyectl.py --host 192.168.1.50 state
+    python tools/eyectl.py --host 192.168.9.1 state    # on the recovery AP
     python tools/eyectl.py mode calibration
     python tools/eyectl.py look 110 80
     python tools/eyectl.py servo TL 120        # calibration mode only
@@ -9,7 +10,8 @@
     python tools/eyectl.py cfg TL --trim-us 40
     python tools/eyectl.py trim 0.7
     python tools/eyectl.py save
-    python tools/eyectl.py release
+    python tools/eyectl.py release      # latches; nothing moves until engage
+    python tools/eyectl.py engage
 
 Standard library only -- no pip install needed.
 """
@@ -36,9 +38,11 @@ def call(host, path, body=None):
 
 
 def print_state(s):
-    print("{}  mode={}  wifi={} {}  vision={}  lid_trim={:.2f}".format(
-        s.get("board", "?"), s.get("mode"), s.get("wifi_mode", "?"),
-        s.get("wifi_ssid", "?"), s.get("vision"), s.get("lid_trim", 0)))
+    print("{}  mode={}  vision={}  lid_trim={:.2f}{}".format(
+        s.get("board", "?"), s.get("mode"), s.get("vision"), s.get("lid_trim", 0),
+        "  RELEASED" if s.get("released") else ""))
+    print("link={}  ssid={}  ip={}".format(
+        s.get("link", "?"), s.get("ssid", "?"), s.get("ip") or "-"))
     print("{:<3} {:<4} {:>8} {:>7} {:>7} {:>8}".format(
         "ch", "name", "angle", "min", "max", "trim_us"))
     for sv in s.get("servos", []):
@@ -51,13 +55,17 @@ def print_state(s):
 def main():
     p = argparse.ArgumentParser(description=__doc__,
                                 formatter_class=argparse.RawDescriptionHelpFormatter)
-    p.add_argument("--host", default="eyemech.local")
+    # The firmware advertises this over mDNS on both the station network and
+    # the recovery AP. 192.168.9.1 still works if mDNS is blocked.
+    p.add_argument("--host", default="eyemech.local",
+                   help="IP or hostname; 192.168.9.1 on the recovery AP")
     sub = p.add_subparsers(dest="cmd", required=True)
 
     sub.add_parser("state")
     sub.add_parser("blink")
     sub.add_parser("save")
     sub.add_parser("release")
+    sub.add_parser("engage")
 
     m = sub.add_parser("mode")
     m.add_argument("mode", choices=["tracking", "auto", "manual", "calibration"])
@@ -88,7 +96,7 @@ def main():
 
     if a.cmd == "state":
         print_state(call(a.host, "/api/state"))
-    elif a.cmd in ("blink", "save", "release"):
+    elif a.cmd in ("blink", "save", "release", "engage"):
         call(a.host, "/api/" + a.cmd, {})
     elif a.cmd == "mode":
         call(a.host, "/api/mode", {"mode": a.mode})
