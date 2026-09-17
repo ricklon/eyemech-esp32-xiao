@@ -1,4 +1,5 @@
 #include "eye_web.h"
+#include "eye_mcp.h"
 #include "eye_motion.h"
 #include "eye_servo.h"
 #include "eye_net.h"
@@ -6,6 +7,7 @@
 #include "board_pins.h"
 #define EYEMECH_BOARD_NAME BOARD_NAME
 
+#include <stdlib.h>
 #include <string.h>
 #include "cJSON.h"
 #include "esp_check.h"
@@ -424,6 +426,88 @@ static esp_err_t engage_post(httpd_req_t *req)
     return send_ok(req);
 }
 
+/* ------------------------------------------------------------------- /mcp */
+
+/* Big enough for any MCP request this server accepts; tool arguments here are a
+ * few numbers and a name. Held on the heap, not the httpd task's stack. */
+#define MCP_MAX_BODY 4096
+
+/* NULL when absent. Caller frees. */
+static char *header_dup(httpd_req_t *req, const char *name)
+{
+    size_t len = httpd_req_get_hdr_value_len(req, name);
+    if (len == 0) return NULL;
+    char *v = malloc(len + 1);
+    if (v && httpd_req_get_hdr_value_str(req, name, v, len + 1) != ESP_OK) {
+        free(v);
+        v = NULL;
+    }
+    return v;
+}
+
+/* The protocol lives in eye_mcp.c; this only moves bytes and headers across. */
+static esp_err_t mcp_post(httpd_req_t *req)
+{
+    int total = req->content_len;
+    if (total <= 0 || total > MCP_MAX_BODY) {
+        httpd_resp_set_status(req, "413 Payload Too Large");
+        return httpd_resp_send(req, NULL, 0);
+    }
+    char *body = malloc((size_t)total);
+    if (!body) return httpd_resp_send_err(req, HTTPD_500_INTERNAL_SERVER_ERROR, "out of memory");
+    int received = 0;
+    while (received < total) {
+        int r = httpd_req_recv(req, body + received, total - received);
+        if (r == HTTPD_SOCK_ERR_TIMEOUT) continue;
+        if (r <= 0) { free(body); return ESP_FAIL; }
+        received += r;
+    }
+
+    eye_mcp_headers_t hdr = {
+        .protocol_version = header_dup(req, "MCP-Protocol-Version"),
+        .method           = header_dup(req, "Mcp-Method"),
+        .name             = header_dup(req, "Mcp-Name"),
+        .origin           = header_dup(req, "Origin"),
+        .host             = header_dup(req, "Host"),
+    };
+    eye_mcp_reply_t reply;
+    eye_mcp_handle(body, (size_t)total, &hdr, &reply);
+    free(body);
+    free((char *)hdr.protocol_version);
+    free((char *)hdr.method);
+    free((char *)hdr.name);
+    free((char *)hdr.origin);
+    free((char *)hdr.host);
+
+    static const struct { int code; const char *line; } s_status[] = {
+        { 200, "200 OK" }, { 202, "202 Accepted" }, { 400, "400 Bad Request" },
+        { 403, "403 Forbidden" }, { 404, "404 Not Found" },
+    };
+    const char *line = "500 Internal Server Error";
+    for (size_t i = 0; i < sizeof(s_status) / sizeof(s_status[0]); i++) {
+        if (s_status[i].code == reply.status) line = s_status[i].line;
+    }
+    httpd_resp_set_status(req, line);
+    esp_err_t err;
+    if (reply.body) {
+        httpd_resp_set_type(req, "application/json");
+        err = httpd_resp_sendstr(req, reply.body);
+        free(reply.body);
+    } else {
+        err = httpd_resp_send(req, NULL, 0);
+    }
+    return err;
+}
+
+/* No server-initiated stream in either protocol era this server speaks, and no
+ * sessions to DELETE. */
+static esp_err_t mcp_not_allowed(httpd_req_t *req)
+{
+    httpd_resp_set_status(req, "405 Method Not Allowed");
+    httpd_resp_set_hdr(req, "Allow", "POST");
+    return httpd_resp_send(req, NULL, 0);
+}
+
 static const httpd_uri_t s_routes[] = {
     { .uri = "/",             .method = HTTP_GET,  .handler = root_get },
     { .uri = "/api/state",    .method = HTTP_GET,  .handler = state_get },
@@ -444,6 +528,9 @@ static const httpd_uri_t s_routes[] = {
     { .uri = "/api/defaults", .method = HTTP_POST, .handler = defaults_post },
     { .uri = "/api/release",  .method = HTTP_POST, .handler = release_post },
     { .uri = "/api/engage",   .method = HTTP_POST, .handler = engage_post },
+    { .uri = "/mcp",          .method = HTTP_POST,   .handler = mcp_post },
+    { .uri = "/mcp",          .method = HTTP_GET,    .handler = mcp_not_allowed },
+    { .uri = "/mcp",          .method = HTTP_DELETE, .handler = mcp_not_allowed },
 };
 
 esp_err_t eye_web_start(void)
@@ -455,6 +542,8 @@ esp_err_t eye_web_start(void)
     httpd_config_t config = HTTPD_DEFAULT_CONFIG();
     config.max_uri_handlers = sizeof(s_routes) / sizeof(s_routes[0]) + 2;
     config.lru_purge_enable = true;
+    /* /mcp builds its tool list and state with cJSON; the default 4096 is tight. */
+    config.stack_size = 6144;
 
     ESP_RETURN_ON_ERROR(httpd_start(&server, &config), TAG, "httpd");
     for (size_t i = 0; i < sizeof(s_routes) / sizeof(s_routes[0]); i++) {

@@ -177,3 +177,38 @@ overrun it again.
 `BL` and `TR` are `(90, 10)`: max below min, encoding that those lid servos are
 mounted mirrored. Clamping code uses `fminf`/`fmaxf` rather than assuming an
 ordering. Normalizing the table would silently invert two lids.
+
+## 2026-09-17 — An MCP server on the board, without engage or calibration
+
+`POST /mcp` in `eye_web` makes the mechanism an MCP server that any client can
+reach by URL, with no hub or helper process in between. The alternatives were
+porting onto xiaozhi-esp32 (an application with a voice pipeline this board does
+not have, in C++, and it would abandon the calibration model that works here),
+a host-side proxy over the HTTP API (quick, but only reachable from that host),
+and registering with agent-hub as a robot (the eventual route to eyes that react
+to a voice agent, which can reuse the same tool table).
+
+The server speaks MCP 2026-07-28, which is stateless, and also answers the
+older `initialize` handshake (2025-03-26 to 2025-11-25). It does both because
+it is not yet known which revision a given client speaks. Every answer is a
+single JSON body: no SSE, no sessions, and nothing a microcontroller has to keep
+open.
+
+The tools are get_state, look, blink, play_animation, stop_animation, set_mode
+and release. **Engage and everything used for calibration are deliberately
+missing.** A release is the software stop, and undoing it must take a person at
+the console or control page, not a model. Calibration is command-and-confirm
+with a human watching a mechanism that reports nothing back, and the broken lid
+arm is what skipping that costs. The motion tools also refuse while released or
+in calibration mode, so a board in safe boot cannot be moved over MCP at all.
+
+Gaze is 0..1 across each axis's calibrated range rather than degrees, for the
+same reason animation keyframes are: it survives recalibration and axes whose
+limits run backwards.
+
+There is no authentication, the same as the rest of the HTTP API. The Origin
+check stops a web page in a browser from driving it, and that is all.
+
+Would revisit if: the board leaves a trusted LAN (add auth first), or a client
+needs change notifications (`subscriptions/listen`), which means holding a
+socket open.

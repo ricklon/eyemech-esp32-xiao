@@ -18,7 +18,7 @@ file(WRITE "${index_html_c}"
      "const unsigned int  index_html_len = sizeof(index_html_start) - 1;\n")
 
 idf_component_register(
-    SRCS "eye_web.c" "${index_html_c}"
+    SRCS "eye_web.c" "eye_mcp.c" "${index_html_c}"
     INCLUDE_DIRS "include"
     REQUIRES board eye_servo eye_motion eye_vision eye_net esp_http_server espressif__cjson
 )
