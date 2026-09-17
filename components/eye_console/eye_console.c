@@ -85,6 +85,7 @@ static void cmd_help(void)
     "  !blink                     queue one blink\r\n"
     "  !trim <0..1>               lid openness\r\n"
     "  !lids <upper> <lower>      how hard lids track gaze (ref 0.8 0.4)\r\n"
+    "  !blinkhold [ms]            how long a blink holds shut (ref 70)\r\n"
     "  !look <lr> <ud>            manual gaze, degrees\r\n"
     "  !anim <name> [n|loop]      play an animation, n times or forever\r\n"
     "  !anim stop                 end a loop after the current cycle\r\n"
@@ -119,6 +120,7 @@ static void cmd_status(void)
     printf("safe boot : %s\r\n", eye_servo_safe_boot() ? "ON (boots released)" : "OFF");
     printf("lid track : upper %.2f  lower %.2f\r\n",
            (double)eye_motion_get_coeff_upper(), (double)eye_motion_get_coeff_lower());
+    printf("blink hold: %d ms\r\n", eye_motion_get_blink_hold_ms());
     printf("free heap : %u bytes\r\n", (unsigned)esp_get_free_heap_size());
     printf("%-5s %-3s %9s %8s %8s %8s %8s %8s\r\n",
            "name", "ch", "angle", "min", "max", "min_us", "max_us", "trim_us");
@@ -386,6 +388,19 @@ static void handle(char *line)
                (double)eye_motion_get_coeff_upper(),
                (double)eye_motion_get_coeff_lower());
     }
+    else if (!strcmp(cmd, "blinkhold")) {
+        const char *v = next_tok(&save);
+        if (v) {
+            esp_err_t err = eye_motion_set_blink_hold_ms(atoi(v));
+            if (err == ESP_ERR_INVALID_ARG) {
+                printf("blink hold must be %d..%d ms\r\n", EYE_BLINK_HOLD_MIN_MS, EYE_BLINK_HOLD_MAX_MS);
+            } else {
+                report("blinkhold", err);
+            }
+        }
+        printf("blink hold: %d ms (reference %d; !save keeps it)\r\n",
+               eye_motion_get_blink_hold_ms(), EYE_BLINK_CLOSED_MS);
+    }
     else if (!strcmp(cmd, "anim")) {
         const char *name = next_tok(&save);
         const char *const *all = eye_motion_anim_names();
@@ -419,6 +434,7 @@ static void handle(char *line)
         esp_err_t err = eye_servo_save();
         if (err == ESP_OK) err = eye_motion_save_lid_trim();
         if (err == ESP_OK) err = eye_motion_save_lid_coeff();
+        if (err == ESP_OK) err = eye_motion_save_blink_hold();
         report("save", err);
     }
     else if (!strcmp(cmd, "safeboot")) {

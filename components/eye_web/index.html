@@ -94,6 +94,11 @@
   <label><span>Upper track</span><input type="range" id="cu" min="0" max="1" step="0.05"><span class="num" id="cuval"></span></label>
   <label><span>Lower track</span><input type="range" id="cl" min="0" max="1" step="0.05"><span class="num" id="clval"></span></label>
   <div class="row"><button id="coeffref">Back to 0.80 / 0.40</button></div>
+  <p class="warn">Blink hold is how long a blink keeps the lids shut before reopening.
+  The reference 70&nbsp;ms is too short for these lids to meet; raise it until a
+  blink closes fully, using Blink above to test. Save keeps it.</p>
+  <label><span>Blink hold</span><input type="range" id="bh" min="30" max="400" step="10"><span class="num" id="bhval"></span></label>
+  <div class="row"><button id="bhref">Back to 70 ms</button></div>
 </fieldset>
 
 <fieldset id="jogbox" hidden>
@@ -224,6 +229,20 @@ document.getElementById('trim').oninput = e => {
   document.getElementById(id + 'val').textContent = (+e.target.value).toFixed(2);
   postCoeff();
 });
+/* Milliseconds, so not syncSlider(): that formats to two decimal places. */
+function syncHold(v) {
+  const el = document.getElementById('bh');
+  if (document.activeElement !== el && Number.isFinite(v)) el.value = v;
+  document.getElementById('bhval').textContent = el.value + ' ms';
+}
+document.getElementById('bh').oninput = e => {
+  document.getElementById('bhval').textContent = e.target.value + ' ms';
+  post('/api/blink_hold', { ms: +e.target.value });
+};
+document.getElementById('bhref').onclick = () => {
+  document.getElementById('bh').value = 70;
+  post('/api/blink_hold', { ms: 70 }).then(refresh);
+};
 document.getElementById('coeffref').onclick = () => {
   document.getElementById('cu').value = 0.8;
   document.getElementById('cl').value = 0.4;
@@ -345,6 +364,7 @@ async function refresh() {
     syncSlider('trim', state.lid_trim);
     syncSlider('cu', state.coeff_upper);
     syncSlider('cl', state.coeff_lower);
+    syncHold(state.blink_hold_ms);
     renderAnims();
     animBox.querySelectorAll('button').forEach(b =>
       b.setAttribute('aria-pressed', b.dataset.anim === state.anim));

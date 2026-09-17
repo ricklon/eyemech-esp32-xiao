@@ -21,8 +21,13 @@ extern "C" {
  * iterations, which does not survive a different core at a different clock. */
 #define EYE_BLINK_GAP_MIN_MS 2000
 #define EYE_BLINK_GAP_MAX_MS 7000
-#define EYE_BLINK_CLOSED_MS  70
+#define EYE_BLINK_CLOSED_MS  70   /* reference default for the hold; tunable, see below */
 #define EYE_BLINK_OPENING_MS 70
+
+/* Range the blink hold may be set to. Below the floor the lids reverse almost
+ * at once; above the ceiling a blink stops reading as a blink. */
+#define EYE_BLINK_HOLD_MIN_MS 30
+#define EYE_BLINK_HOLD_MAX_MS 400
 
 #define EYE_MOTION_TICK_HZ   100
 
@@ -145,6 +150,17 @@ float     eye_motion_get_coeff_upper(void);
 float     eye_motion_get_coeff_lower(void);
 esp_err_t eye_motion_set_lid_coeff(float upper, float lower);
 esp_err_t eye_motion_save_lid_coeff(void);
+
+/* How long a blink holds the lids at their closed limit before reopening.
+ * The reference 70 ms is shorter than these lids take to travel ~50 degrees
+ * under load, so they reverse before they meet — a quick, partial blink. It is
+ * a command time, not a measured one: nothing reports when a lid gets there.
+ * Out-of-range values are refused rather than clamped, so a typo does not
+ * quietly become a different setting. Not persisted until
+ * eye_motion_save_blink_hold(). */
+esp_err_t eye_motion_set_blink_hold_ms(int ms);
+int       eye_motion_get_blink_hold_ms(void);
+esp_err_t eye_motion_save_blink_hold(void);
 
 /* Queue one blink; the state machine picks it up on the next tick. */
 esp_err_t eye_motion_request_blink(void);

@@ -26,6 +26,7 @@ static float s_x_target = 90.0f, s_y_target = 90.0f;
 #define NVS_NAMESPACE    "eyemech"
 #define NVS_KEY_TRIM     "lid_trim"
 #define NVS_KEY_COEFF    "lid_coeff"
+#define NVS_KEY_BLINK    "blink_hold"
 
 /* How strongly each lid pair tracks vertical gaze. The reference values are
  * 0.8 upper / 0.4 lower, and the asymmetry between them is most of what reads
@@ -38,6 +39,7 @@ static float s_x_target = 90.0f, s_y_target = 90.0f;
 static float s_lid_trim = LID_TRIM_DEFAULT;
 static float s_coeff_upper = LID_COEFF_UPPER_DEFAULT;
 static float s_coeff_lower = LID_COEFF_LOWER_DEFAULT;
+static int   s_blink_hold_ms = EYE_BLINK_CLOSED_MS;
 
 static eye_mode_t s_mode = EYE_MODE_AUTO;
 static bool       s_blink_requested;
@@ -310,6 +312,40 @@ static void load_lid_coeff(void)
         s_coeff_lower = clampf(v[1], 0.0f, 1.0f);
         ESP_LOGI(TAG, "lid coefficients %.2f/%.2f from NVS",
                  (double)s_coeff_upper, (double)s_coeff_lower);
+    }
+    nvs_close(h);
+}
+
+esp_err_t eye_motion_set_blink_hold_ms(int ms)
+{
+    if (ms < EYE_BLINK_HOLD_MIN_MS || ms > EYE_BLINK_HOLD_MAX_MS) return ESP_ERR_INVALID_ARG;
+    s_blink_hold_ms = ms;
+    return ESP_OK;
+}
+
+int eye_motion_get_blink_hold_ms(void) { return s_blink_hold_ms; }
+
+/* Its own key, like the trim and the coefficients, and for the same reason. */
+esp_err_t eye_motion_save_blink_hold(void)
+{
+    nvs_handle_t h;
+    esp_err_t err = nvs_open(NVS_NAMESPACE, NVS_READWRITE, &h);
+    if (err != ESP_OK) return err;
+    err = nvs_set_u16(h, NVS_KEY_BLINK, (uint16_t)s_blink_hold_ms);
+    if (err == ESP_OK) err = nvs_commit(h);
+    nvs_close(h);
+    ESP_LOGI(TAG, "blink hold %d ms saved: %s", s_blink_hold_ms, esp_err_to_name(err));
+    return err;
+}
+
+static void load_blink_hold(void)
+{
+    nvs_handle_t h;
+    if (nvs_open(NVS_NAMESPACE, NVS_READONLY, &h) != ESP_OK) return;
+    uint16_t v;
+    if (nvs_get_u16(h, NVS_KEY_BLINK, &v) == ESP_OK &&
+        eye_motion_set_blink_hold_ms(v) == ESP_OK) {
+        ESP_LOGI(TAG, "blink hold %u ms from NVS", (unsigned)v);
     }
     nvs_close(h);
 }
@@ -666,7 +702,7 @@ static void motion_task(void *arg)
             if (blink_phase == BLINK_IDLE && (s_blink_requested || t >= next_blink_at)) {
                 s_blink_requested = false;
                 blink_phase = BLINK_CLOSED;
-                blink_until = t + EYE_BLINK_CLOSED_MS;
+                blink_until = t + s_blink_hold_ms;
                 eye_motion_blink_now();
             } else if (blink_phase == BLINK_CLOSED && t >= blink_until) {
                 blink_phase = BLINK_OPENING;
@@ -752,6 +788,7 @@ esp_err_t eye_motion_start(void)
 {
     load_lid_trim();
     load_lid_coeff();
+    load_blink_hold();
     if (xTaskCreate(motion_task, "eye_motion", 4096, NULL, 5, NULL) != pdPASS) {
         return ESP_ERR_NO_MEM;
     }
