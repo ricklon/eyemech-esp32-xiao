@@ -128,6 +128,16 @@ static esp_err_t state_get(httpd_req_t *req)
     cJSON_AddNumberToObject(root, "blink_gap_min_ms", gap_min);
     cJSON_AddNumberToObject(root, "blink_gap_max_ms", gap_max);
     cJSON_AddStringToObject(root, "blink_style", eye_motion_blink_style_name(eye_motion_get_blink_style()));
+
+    eye_mcp_last_t mcp;
+    eye_mcp_last(&mcp);
+    cJSON *m = cJSON_AddObjectToObject(root, "mcp_last");
+    cJSON_AddNumberToObject(m, "count", mcp.count);
+    cJSON_AddStringToObject(m, "era", mcp.era);
+    cJSON_AddStringToObject(m, "version", mcp.version);
+    cJSON_AddStringToObject(m, "method", mcp.method);
+    cJSON_AddStringToObject(m, "client", mcp.client);
+    cJSON_AddNumberToObject(m, "status", mcp.status);
     cJSON_AddNumberToObject(root, "lr", eye_motion_target_lr());
     cJSON_AddNumberToObject(root, "ud", eye_motion_target_ud());
 

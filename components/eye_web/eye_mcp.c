@@ -489,6 +489,54 @@ static cJSON *tools_list(void)
     return r;
 }
 
+/* ------------------------------------------------------ last request seen */
+
+static struct {
+    unsigned count;
+    char     era[8];
+    char     version[16];
+    char     method[32];
+    char     client[64];
+    int      status;
+} s_last;
+
+static void note_client(const cJSON *info)
+{
+    const cJSON *n = cJSON_GetObjectItemCaseSensitive(info, "name");
+    const cJSON *v = cJSON_GetObjectItemCaseSensitive(info, "version");
+    if (!cJSON_IsString(n)) return;
+    snprintf(s_last.client, sizeof(s_last.client), "%s%s%s", n->valuestring,
+             cJSON_IsString(v) ? " " : "", cJSON_IsString(v) ? v->valuestring : "");
+}
+
+void eye_mcp_last(eye_mcp_last_t *out)
+{
+    out->count   = s_last.count;
+    out->era     = s_last.era;
+    out->version = s_last.version;
+    out->method  = s_last.method;
+    out->client  = s_last.client;
+    out->status  = s_last.status;
+}
+
+static cJSON *supported_versions(void)
+{
+    cJSON *sup = cJSON_CreateArray();
+    cJSON_AddItemToArray(sup, cJSON_CreateString(MCP_MODERN));
+    for (size_t i = 0; i < LEGACY_COUNT; i++) {
+        cJSON_AddItemToArray(sup, cJSON_CreateString(s_legacy_versions[i]));
+    }
+    return sup;
+}
+
+static bool is_legacy_version(const char *v)
+{
+    for (size_t i = 0; v && i < LEGACY_COUNT; i++) {
+        if (strcmp(v, s_legacy_versions[i]) == 0) return true;
+    }
+    return false;
+}
+
 /* ------------------------------------------------------------- dispatch */
 
 static bool header_is(const char *hdr, const char *expected)
@@ -500,8 +548,21 @@ static bool header_is(const char *hdr, const char *expected)
     return same;
 }
 
+static void handle(const char *body, size_t len, const eye_mcp_headers_t *hdr,
+                   eye_mcp_reply_t *out);
+
 void eye_mcp_handle(const char *body, size_t len, const eye_mcp_headers_t *hdr,
                     eye_mcp_reply_t *out)
+{
+    s_last.era[0] = s_last.version[0] = '\0';
+    strcpy(s_last.method, "?");
+    handle(body, len, hdr, out);
+    s_last.status = out->status;
+    s_last.count++;
+}
+
+static void handle(const char *body, size_t len, const eye_mcp_headers_t *hdr,
+                   eye_mcp_reply_t *out)
 {
     out->status = 200;
     out->body = NULL;
@@ -525,6 +586,7 @@ void eye_mcp_handle(const char *body, size_t len, const eye_mcp_headers_t *hdr,
         return;
     }
     const char *method = method_j->valuestring;
+    snprintf(s_last.method, sizeof(s_last.method), "%s", method);
 
     if (id == NULL) {   /* a notification, e.g. legacy notifications/initialized */
         out->status = 202;
@@ -536,15 +598,45 @@ void eye_mcp_handle(const char *body, size_t len, const eye_mcp_headers_t *hdr,
     const cJSON *meta = cJSON_GetObjectItemCaseSensitive(params, "_meta");
     const cJSON *version = cJSON_GetObjectItemCaseSensitive(meta, META_VERSION);
     bool modern = version != NULL;
+    strcpy(s_last.era, modern ? "modern" : "legacy");
+    if (modern) {
+        snprintf(s_last.version, sizeof(s_last.version), "%s",
+                 cJSON_IsString(version) ? version->valuestring : "?");
+        note_client(cJSON_GetObjectItemCaseSensitive(meta, "io.modelcontextprotocol/clientInfo"));
+    } else {
+        /* 2025-06-18 onward send the header after initialize; before that, or on
+         * initialize itself, the spec says to assume 2025-03-26. */
+        snprintf(s_last.version, sizeof(s_last.version), "%s",
+                 hdr->protocol_version ? hdr->protocol_version : "2025-03-26?");
+        if (strcmp(method, "initialize") == 0) {
+            note_client(cJSON_GetObjectItemCaseSensitive(params, "clientInfo"));
+        }
+    }
+
+    if (!modern && hdr->protocol_version) {
+        /* The header claims the stateless revision but the body carries no
+         * version: the two disagree about what this request is. */
+        if (strcmp(hdr->protocol_version, MCP_MODERN) == 0) {
+            finish(out, 400, rpc_error(id, ERR_HEADER_MISMATCH,
+                "Header mismatch: MCP-Protocol-Version is 2026-07-28 but params._meta "
+                "carries no io.modelcontextprotocol/protocolVersion", NULL));
+            cJSON_Delete(req);
+            return;
+        }
+        if (!is_legacy_version(hdr->protocol_version)) {
+            cJSON *data = cJSON_CreateObject();
+            cJSON_AddItemToObject(data, "supported", supported_versions());
+            cJSON_AddStringToObject(data, "requested", hdr->protocol_version);
+            finish(out, 400, rpc_error(id, ERR_VERSION, "Unsupported protocol version", data));
+            cJSON_Delete(req);
+            return;
+        }
+    }
 
     if (modern) {
         if (!cJSON_IsString(version) || strcmp(version->valuestring, MCP_MODERN) != 0) {
             cJSON *data = cJSON_CreateObject();
-            cJSON *sup = cJSON_AddArrayToObject(data, "supported");
-            cJSON_AddItemToArray(sup, cJSON_CreateString(MCP_MODERN));
-            for (size_t i = 0; i < LEGACY_COUNT; i++) {
-                cJSON_AddItemToArray(sup, cJSON_CreateString(s_legacy_versions[i]));
-            }
+            cJSON_AddItemToObject(data, "supported", supported_versions());
             cJSON_AddItemToObject(data, "requested",
                 cJSON_IsString(version) ? cJSON_CreateString(version->valuestring) : cJSON_CreateNull());
             finish(out, 400, rpc_error(id, ERR_VERSION, "Unsupported protocol version", data));
@@ -587,11 +679,7 @@ void eye_mcp_handle(const char *body, size_t len, const eye_mcp_headers_t *hdr,
         result = cJSON_CreateObject();   /* removed in 2026-07-28, still legacy */
     } else if (strcmp(method, "server/discover") == 0) {
         result = cJSON_CreateObject();
-        cJSON *sup = cJSON_AddArrayToObject(result, "supportedVersions");
-        cJSON_AddItemToArray(sup, cJSON_CreateString(MCP_MODERN));
-        for (size_t i = 0; i < LEGACY_COUNT; i++) {
-            cJSON_AddItemToArray(sup, cJSON_CreateString(s_legacy_versions[i]));
-        }
+        cJSON_AddItemToObject(result, "supportedVersions", supported_versions());
         cJSON_AddObjectToObject(cJSON_AddObjectToObject(result, "capabilities"), "tools");
         cJSON_AddStringToObject(result, "instructions", s_instructions);
         cJSON_AddNumberToObject(result, "ttlMs", 3600000);
