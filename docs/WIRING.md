@@ -1,10 +1,68 @@
-# Eye Mechanism — XIAO ESP32C6 + PCA9685
+# Eye Mechanism — XIAO ESP32-C6 / ESP32-S3 + PCA9685
 
 ## Files
 
-Copy all three to the board's filesystem: `pca9685.py`, `servo.py`, `main.py`.
+For the MicroPython C6 original, copy all three files to the board's
+filesystem: `pca9685.py`, `servo.py`, `main.py`. For the ESP-IDF C port, select
+the board with the PlatformIO environment: `xiao_esp32c6` or `xiao_esp32s3`.
 
-## XIAO ESP32C6 pin map
+## Network setup
+
+WiFi is `eye_net`'s job. The board keeps up to four station profiles in NVS and
+sweeps them at boot; the first that reaches an IP becomes the default. The
+**recovery access point is always up**, in every station state:
+
+| Recovery AP | Value |
+|---|---|
+| SSID | `eyemech-setup` |
+| Password | `CONFIG_EYE_NET_AP_PASSWORD` — set it in menuconfig; the default is public |
+| URL | `http://192.168.9.1/` |
+
+It sits on 192.168.9.1, not 192.168.4.1, because the bench LAN is 192.168.4.0/22
+and the two collided.
+
+On a first boot, or on a new network, join over the USB serial console:
+
+```
+!wifi scan
+!wifi set "Some Network" thepassword
+```
+
+`!wifi set` tries the credentials live and saves them only if the station gets an
+IP. The board then answers as `eyemech.local` over mDNS. See
+[OPERATION.md](OPERATION.md#network) for profiles, eviction and the sweep.
+Setting WiFi from the control page is not in this build yet.
+
+## XIAO physical wiring
+
+The C6 and S3 builds use the same physical XIAO silk pins. If you wire by
+`D0`..`D10`, the PCA9685 and Grove Vision connections do not move when swapping
+between boards.
+
+| XIAO silk | Connects to |
+|---|---|
+| D0 / A0 | Free |
+| D1 / A1 | Free |
+| D2 / A2 | Free |
+| D3 | Free |
+| D4 (SDA) | PCA9685 SDA |
+| D5 (SCL) | PCA9685 SCL |
+| D6 (TX) | Grove Vision **RX** |
+| D7 (RX) | Grove Vision **TX** |
+| D8 | Free |
+| D9 | Free |
+| D10 | PCA9685 `/OE` (optional; not wired on this build — see below) |
+| 3V3 | PCA9685 VCC, Grove Vision VCC |
+| GND | Common ground (mandatory — see below) |
+
+The pots, switches and buttons from the MicroPython C6 build are gone in the C
+port; the browser control surface replaced them. D0-D3, D8 and D9 are free on
+both boards.
+
+### MicroPython original on the C6
+
+The reference build in `micropython/` still uses the pots and switches, on these
+pins. This table is for running that build, not the C port.
 
 | XIAO | GPIO | Connects to |
 |---|---|---|
@@ -27,6 +85,29 @@ external resistors needed on those.
 
 Only GPIO0/1/2 are ADC-capable on this board, so the three pots are
 locked to D0/D1/D2. Everything else is placed around them.
+
+## Board GPIO maps
+
+These are the GPIO numbers behind the same physical XIAO pins above. Firmware
+uses `components/board/include/board_pins.h`, so do not move wires when changing
+the PlatformIO environment; use `xiao_esp32c6` or `xiao_esp32s3` instead.
+
+| XIAO silk | ESP32-C6 GPIO | ESP32-S3 GPIO | Role |
+|---|---:|---:|---|
+| D0 / A0 | 0 | 1 | Free |
+| D1 / A1 | 1 | 2 | Free |
+| D2 / A2 | 2 | 3 | Free |
+| D3 | 21 | 4 | Free |
+| D4 (SDA) | 22 | 5 | PCA9685 SDA |
+| D5 (SCL) | 23 | 6 | PCA9685 SCL |
+| D6 (TX) | 16 | 43 | Grove Vision **RX** |
+| D7 (RX) | 17 | 44 | Grove Vision **TX** |
+| D8 | 19 | 7 | Free |
+| D9 | 20 | 8 | Free |
+| D10 | 18 | 9 | PCA9685 `/OE` (optional) |
+
+The XIAO user LED also differs: C6 uses GPIO15, S3 uses GPIO21. It is active
+low on both boards and is handled in firmware only.
 
 ## PCA9685 channels
 
@@ -143,14 +224,20 @@ PWM signal has no reference and servos twitch, buzz, or ignore commands.
 
 ## First bring-up, in order
 
-1. Power the logic only. Confirm the PCA9685 answers on I2C:
-   `I2C(0, sda=Pin(22), scl=Pin(23), freq=400_000).scan()` should return
-   `[64]` (0x40).
-2. Servo supply on. Nothing should move: on a cold start the PCA9685
-   generates no pulses until something writes to it.
-3. One servo on channel 0. Run `main.py` in calibration mode (mode switch
-   held) and confirm it centres.
-4. Fit horns and linkages with everything at 90°, then add the rest.
+1. Power the logic only. Confirm the PCA9685 answers on I2C at 0x40: `!status`
+   over the serial console reports it. For the MicroPython original:
+   - C6: `I2C(0, sda=Pin(22), scl=Pin(23), freq=400_000).scan()`
+   - S3: `I2C(0, sda=Pin(5), scl=Pin(6), freq=400_000).scan()`
+
+   Both should return `[64]`.
+2. Servo supply on. Nothing should move: on a cold start the PCA9685 generates no
+   pulses until something writes to it, and safe boot keeps every channel released.
+3. Open the control page at `http://eyemech.local/`, or join `eyemech-setup` and
+   use `http://192.168.9.1/` if no network is configured yet.
+4. One servo on channel 0, one step at a time. The full procedure, including the
+   one-2°-step rule after any mechanical change, is in
+   [CALIBRATION.md](CALIBRATION.md).
+5. Fit horns and linkages with everything at 90°, then add the rest.
 
 ## Calibration you still have to do
 
@@ -180,8 +267,9 @@ centring offsets rather than fudging `servo_limits`.
 ## Notes on what changed from the Pico version
 
 - `picozero` was a dead import — `Button` was never used. Removed.
-- The XIAO's user LED (GPIO15) is **active low**, opposite the Pico's
-  GPIO25. Polarity inverted in the port.
+- The XIAO C6 user LED (GPIO15) is **active low**, opposite the Pico's GPIO25.
+  The S3 user LED is GPIO21 and is also active low. Polarity is handled by
+  `board_pins.h`.
 - Blink timing was tied to loop-iteration count
   (`random.randrange(20000)`), which doesn't survive a different core at a
   different clock. Now driven by `ticks_ms()`.
