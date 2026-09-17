@@ -277,6 +277,12 @@ HTTP (`/api/pose`) or the console (`!pose`).
   tracker therefore reaches the board through a local bridge, which it needs
   anyway: a camera needs HTTPS or localhost, and the board serves plain HTTP.
 
+**A pose sender must set `TCP_NODELAY`.** Tested on the mechanism 2026-09-17: the
+same 30 Hz stream was visibly choppy until `tools/posetest.py` disabled Nagle's
+algorithm, and reasonably smooth after, with no firmware change. Nagle holds each
+small frame back waiting for an ACK, so poses arrive in bunches. Browsers disable
+it for WebSockets; a Python or other native bridge has to do it explicitly.
+
 The rates and timeout are compile-time constants in `eye_motion.h`, chosen, not
 measured. Would revisit if: tracked blinks look sluggish (raise the lid rate), a
 real stream jitters visibly (smoothing belongs in the sender, which has the

@@ -24,6 +24,9 @@ import time
 
 def ws_connect(host, port, path):
     s = socket.create_connection((host, port), timeout=5)
+    # Small frames at a steady rate: without this, Nagle's algorithm holds each
+    # one back waiting for an ACK, and poses arrive in bursts that look choppy.
+    s.setsockopt(socket.IPPROTO_TCP, socket.TCP_NODELAY, 1)
     key = base64.b64encode(os.urandom(16)).decode()
     s.sendall((f"GET {path} HTTP/1.1\r\nHost: {host}\r\nUpgrade: websocket\r\n"
                f"Connection: Upgrade\r\nSec-WebSocket-Key: {key}\r\n"
