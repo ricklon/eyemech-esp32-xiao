@@ -116,6 +116,9 @@ static void test_legacy_initialize_and_list(void)
     }
     CHECK(!saw_engage);
     CHECK(path(r.json, "result", "ttlMs") == NULL);
+    const cJSON *anim = cJSON_GetArrayItem(tools, 3);
+    const cJSON *desc = path(path(path(anim, "inputSchema", "properties"), "name", NULL), "description", NULL);
+    CHECK(cJSON_IsString(desc) && strcmp(desc->valuestring, "look: glance around\nroll: full circle") == 0);
     done(&r);
 
     r = post("{\"jsonrpc\":\"2.0\",\"id\":4,\"method\":\"ping\"}", NULL);

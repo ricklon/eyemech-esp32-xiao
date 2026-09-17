@@ -36,6 +36,7 @@ float       eye_motion_target_ud(void)             { return fake.ud; }
 float       eye_motion_get_lid_trim(void)          { return 0.85f; }
 const char *eye_motion_anim_playing(void)          { return fake.playing; }
 const char *const *eye_motion_anim_names(void)     { return s_anims; }
+const char *eye_motion_anim_desc(const char *name) { return strcmp(name, "look") == 0 ? "glance around" : "full circle"; }
 esp_err_t   eye_motion_request_blink(void)         { fake.blinks++; return ESP_OK; }
 esp_err_t   eye_motion_anim_stop(void)             { fake.anim_stops++; return ESP_OK; }
 

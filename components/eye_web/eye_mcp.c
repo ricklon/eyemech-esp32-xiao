@@ -389,8 +389,22 @@ static cJSON *anim_schema(void)
     cJSON *name = cJSON_CreateObject();
     cJSON_AddStringToObject(name, "type", "string");
     cJSON *names = cJSON_AddArrayToObject(name, "enum");
+    /* One "name: what it looks like" line per animation, from the same table the
+     * control page labels its buttons with, so a model can choose by effect. */
+    size_t len = 1;
     for (const char *const *a = eye_motion_anim_names(); *a; a++) {
         cJSON_AddItemToArray(names, cJSON_CreateString(*a));
+        len += strlen(*a) + strlen(eye_motion_anim_desc(*a)) + 3;
+    }
+    char *desc = malloc(len);
+    if (desc) {
+        size_t o = 0;
+        for (const char *const *a = eye_motion_anim_names(); *a; a++) {
+            o += (size_t)snprintf(desc + o, len - o, "%s%s: %s", o ? "\n" : "", *a,
+                                  eye_motion_anim_desc(*a));
+        }
+        cJSON_AddStringToObject(name, "description", desc);
+        free(desc);
     }
     add_prop(s, "name", name);
     cJSON *rep = cJSON_CreateObject();
