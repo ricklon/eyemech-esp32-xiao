@@ -325,3 +325,37 @@ NVS comes up blinking the original way until they are set again.
 
 Would revisit if: alternate survives a longer run without reading as a tic, in
 which case it becomes the default in the source, per the entry above.
+
+## 2026-09-21 — A stdio proxy in front of `/mcp`, so an absent board is not a dead server
+
+Registered by URL, Claude Code probes `http://eyemech.local/mcp` once at session
+start with a 5 s limit. With the board unplugged, resolving `eyemech.local` over
+mDNS alone takes 5.1 s to fail on this host, so the probe times out, the server
+is marked failed, and its tools stay missing for the rest of the session even
+after the board comes back.
+
+`tools/eyemech_mcp.py` is a stdio MCP server that Claude Code launches locally.
+It forwards every request to `POST /mcp` unchanged, deriving the transport
+headers from the body. It caches the replies that only change with a reflash
+(`initialize`, `server/discover`, `tools/list`), answers those from the cache at
+once and refreshes them in the background. A tool call made while the board is
+away comes back as a tool error saying so; the next call after it returns
+reaches it. It also remembers the board's IP address after the first answer, so
+the mDNS lookup is not paid on every call.
+
+This walks back part of the 2026-09-17 entry, which rejected a host-side proxy.
+That rejection still holds for the thing it was about: the board is still a
+complete MCP server that any client can reach by URL, and the proxy adds no
+tools, no state and no protocol logic of its own. It exists only because this
+client cannot tolerate the server being absent at startup.
+
+Over stdio, Claude Code 2.1.278 opens with the legacy `initialize` at
+2025-11-25, not the stateless revision it uses over HTTP, so the board's legacy
+path is now the one in daily use from this host.
+
+The cache needs the board to have answered once. With no cache and no board,
+`initialize` fails and the server shows as failed, just as the URL registration
+did.
+
+Would revisit if: Claude Code retries failed servers on its own, or the board
+moves behind agent-hub, which would own this problem instead.
