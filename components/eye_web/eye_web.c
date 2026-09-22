@@ -11,6 +11,7 @@
 #include <string.h>
 #include <strings.h>
 #include "cJSON.h"
+#include "sdkconfig.h"
 #include "esp_check.h"
 #include "esp_http_server.h"
 #include "esp_log.h"
@@ -562,8 +563,26 @@ static esp_err_t follow_stop_post(httpd_req_t *req)
     return send_ok(req);
 }
 
+/* True when `origin` is one of CONFIG_EYE_WEB_EXTRA_ORIGINS: exact entries,
+ * comma-separated, compared without regard to case. */
+static bool extra_origin(const char *origin)
+{
+    size_t n = strlen(origin);
+    const char *p = CONFIG_EYE_WEB_EXTRA_ORIGINS;
+    while (*p) {
+        while (*p == ',' || *p == ' ') p++;
+        const char *end = p;
+        while (*end && *end != ',' && *end != ' ') end++;
+        if (n > 0 && (size_t)(end - p) == n && strncasecmp(p, origin, n) == 0) return true;
+        p = end;
+    }
+    return false;
+}
+
 /* A browser on another origin must not get a socket that drives servos: same
- * rule, and the same reason, as /mcp. Runs before the upgrade is answered. */
+ * rule, and the same reason, as /mcp. Runs before the upgrade is answered.
+ * The exception is CONFIG_EYE_WEB_EXTRA_ORIGINS, by default the eye-tracking
+ * dashboard on localhost, which streams poses straight from the browser. */
 static esp_err_t ws_origin_check(httpd_req_t *req)
 {
     size_t olen = httpd_req_get_hdr_value_len(req, "Origin");
@@ -574,6 +593,7 @@ static esp_err_t ws_origin_check(httpd_req_t *req)
         httpd_req_get_hdr_value_str(req, "Host", host, sizeof(host)) != ESP_OK) {
         return ESP_FAIL;
     }
+    if (extra_origin(origin)) return ESP_OK;
     const char *o = origin;
     if (strncmp(o, "http://", 7) == 0)       o += 7;
     else if (strncmp(o, "https://", 8) == 0) o += 8;
