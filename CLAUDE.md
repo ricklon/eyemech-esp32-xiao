@@ -86,6 +86,7 @@ micropython/              THE ORIGINAL — reference, not dead code
 docs/WIRING.md            pin map, power, bring-up order, calibration procedure
 docs/PORTING.md           function-by-function map from Python to C
 tools/eyectl.py           drive the HTTP API from a shell
+tools/eyemech_mcp.py      stdio MCP proxy to /mcp; survives the board being away
 ```
 
 ## Things that will bite you
