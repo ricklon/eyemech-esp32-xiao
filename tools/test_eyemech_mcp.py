@@ -105,6 +105,7 @@ class ProxyTest(unittest.TestCase):
                 replies[r["id"]] = r
         proc.stdin.close()
         proc.wait(timeout=10)
+        proc.stdout.close()
         return replies
 
     def test_forwards_modern_with_headers_and_caches_tools(self):
@@ -151,6 +152,25 @@ class ProxyTest(unittest.TestCase):
         self.assertEqual(r[2]["result"]["content"][0]["text"], "state")
         _, h = FakeBoard.seen[-1]
         self.assertEqual(h["MCP-Protocol-Version"], "2025-06-18")
+
+    def test_remembered_address_is_not_used_for_another_host(self):
+        """A cache naming another host's address must not be dialled: that would
+        send commands to whatever now holds it."""
+        self.board_up()
+        self.run_proxy(modern("tools/list", 1))
+        with open(self.cache) as f:
+            cache = json.load(f)
+        cache["_addr"] = {"host": "eyemech.local", "addr": "127.0.0.1:{}".format(self.port)}
+        with open(self.cache, "w") as f:
+            json.dump(cache, f)
+        before = len(FakeBoard.seen)
+        proc = subprocess.Popen(
+            [sys.executable, PROXY, "--host", "192.0.2.1", "--timeout", "1", "--cache", self.cache],
+            stdin=subprocess.PIPE, stdout=subprocess.PIPE, stderr=subprocess.DEVNULL, text=True)
+        out, _ = proc.communicate(json.dumps(
+            modern("tools/call", 1, name="get_state")) + "\n", timeout=30)
+        self.assertTrue(json.loads(out)["result"]["isError"])
+        self.assertEqual(len(FakeBoard.seen), before)   # the fake board was never dialled
 
     def test_board_error_bodies_pass_through(self):
         self.board_up()

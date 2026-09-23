@@ -59,7 +59,12 @@ class Board:
         self.cache = self._load_cache()
         # Resolving eyemech.local over mDNS can take seconds, and fails slowly
         # when the board is away. Once it has answered, talk to its address.
-        self.addr = self.cache.get("_addr")
+        # It is only that host's address: pointing --host somewhere else must
+        # not send commands to whatever this address was last time.
+        cached = self.cache.get("_addr")
+        if not isinstance(cached, dict):
+            cached = {}          # an older cache stored a bare address string
+        self.addr = cached.get("addr") if cached.get("host") == host else None
 
     # ------------------------------------------------------------- cache
 
@@ -137,9 +142,10 @@ class Board:
             addr = socket.gethostbyname(name) + sep + port
         except OSError:
             return
-        if addr != self.host and addr != self.cache.get("_addr"):
+        if addr != self.host and addr != self.addr:
             with self.lock:
-                self.addr = self.cache["_addr"] = addr
+                self.addr = addr
+                self.cache["_addr"] = {"host": self.host, "addr": addr}
                 self._save_cache()
 
     # ----------------------------------------------------------- requests
