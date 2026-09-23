@@ -353,6 +353,14 @@ Over stdio, Claude Code 2.1.278 opens with the legacy `initialize` at
 2025-11-25, not the stateless revision it uses over HTTP, so the board's legacy
 path is now the one in daily use from this host.
 
+**Checked 2026-09-22** against the board on 192.168.1.212, running
+`fix/mcp-version-header`: `initialize`, `tools/list` and a `get_state` call all
+go through the proxy, and `mcp_last` recorded era `legacy`, version `2025-11-25`,
+client `claude-code 2.1.278`, `tools/call`, 200. `claude mcp list` shows the
+server connected. Pointed at an unreachable host with the cache in place,
+startup is still answered at once and a `look` comes back as a tool error
+without reaching the board.
+
 The cache needs the board to have answered once. With no cache and no board,
 `initialize` fails and the server shows as failed, just as the URL registration
 did.
