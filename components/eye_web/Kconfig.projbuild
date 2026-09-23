@@ -1,0 +1,16 @@
+menu "eyemech web"
+
+config EYE_WEB_EXTRA_ORIGINS
+    string "Extra origins allowed to stream poses"
+    default "http://localhost:8080,http://127.0.0.1:8080"
+    help
+        Browser origins, besides pages served by the board itself, that may open
+        /ws/pose. Comma-separated, each an exact scheme://host:port, compared
+        without regard to case. The default is the eye-tracking dashboard served
+        locally by `just web`, so it can stream follow poses straight to the
+        board. A browser cannot forge its Origin, so these admit only pages
+        served from the operator's own machine on that port. Leave empty to
+        accept same-origin pages only. Non-browser senders send no Origin and
+        are unaffected.
+
+endmenu

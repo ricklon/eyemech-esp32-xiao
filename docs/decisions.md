@@ -375,3 +375,30 @@ did.
 
 Would revisit if: Claude Code retries failed servers on its own, or the board
 moves behind agent-hub, which would own this problem instead.
+
+## 2026-09-21 — /ws/pose also admits the local eye-tracking dashboard
+
+The follow-mode entry above sent a browser tracker through a local bridge, because
+`/ws/pose` refused every cross-origin page. The eye-tracking dashboard now streams
+straight from the browser, the way smartcar4activities' direct mode talks to its
+car. `CONFIG_EYE_WEB_EXTRA_ORIGINS` (menuconfig → *eyemech web*) lists origins
+admitted in addition to the board's own pages, exact and comma-separated, by
+default `http://localhost:8080,http://127.0.0.1:8080`: the dashboard as `just web`
+serves it.
+
+- **An allow-list, not "any origin".** A browser cannot forge Origin, so a
+  localhost entry admits only pages served from the operator's own machine on that
+  port. Allowing every origin would let any web page open on the LAN drive servos.
+- **Build-time, like the hostname.** Changing it means a reflash; leave it empty
+  for same-origin only. Non-browser senders (the bridge, `tools/posetest.py`) send
+  no Origin and are unaffected.
+- **Only /ws/pose.** `/mcp` and the HTTP API keep the same-origin rule and send no
+  CORS headers, so a direct page streams poses but cannot read `/api/state` or
+  engage. Poses are still refused while released or in standby.
+
+Host-checked the matcher (exact, case-insensitive, spaces around commas, empty
+list admits nothing) and built for the S3. Not yet run against a browser on the
+mechanism.
+
+Would revisit if: the dashboard needs state or engage from the page (add CORS for
+the same list), or it is served from a port other than 8080.
