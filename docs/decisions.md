@@ -209,6 +209,12 @@ limits run backwards.
 There is no authentication, the same as the rest of the HTTP API. The Origin
 check stops a web page in a browser from driving it, and that is all.
 
+**Checked 2026-09-17:** Claude Code 2.1.274 speaks the modern revision. A
+headless `claude -p` run called `get_state` through the registered server, and
+`/api/state`'s `mcp_last` recorded era `modern`, version `2026-07-28`, client
+`claude-code 2.1.274` and status 200, with no `initialize`. The legacy path stays
+for other clients; nothing here depends on it.
+
 Would revisit if: the board leaves a trusted LAN (add auth first), or a client
 needs change notifications (`subscriptions/listen`), which means holding a
 socket open.
@@ -319,7 +325,9 @@ Set at the bench and saved to NVS:
 - **Blink gap 10–20 s**: the reference 2–7 s read as a repeated fast blink.
 - **Blink hold 150 ms**: the reference 70 ms reopens before these lids meet.
 
-Like the calibrated limits, these live in NVS, not in the source. The compiled
+They survived the board being unplugged and plugged back in: /api/state reported
+all three after the power cycle. Like the calibrated limits, they live in NVS,
+not in the source. The compiled
 defaults are still the reference (both, 2–7 s, 70 ms), so a board with erased
 NVS comes up blinking the original way until they are set again.
 

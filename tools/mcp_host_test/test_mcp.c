@@ -182,6 +182,75 @@ static void test_modern_header_validation(void)
     done(&r);
 }
 
+static void test_header_version_without_meta(void)
+{
+    fake_reset();
+    const char *body = "{\"jsonrpc\":\"2.0\",\"id\":1,\"method\":\"tools/list\"}";
+
+    /* Header says the stateless revision, body has no _meta version. */
+    eye_mcp_headers_t modern_hdr = { .protocol_version = "2026-07-28", .method = "tools/list" };
+    resp_t r = post(body, &modern_hdr);
+    CHECK(r.status == 400 && error_code(&r) == -32020);
+    done(&r);
+
+    /* A version nobody supports, no _meta. */
+    eye_mcp_headers_t unknown = { .protocol_version = "2031-01-01" };
+    r = post(body, &unknown);
+    CHECK(r.status == 400 && error_code(&r) == -32022);
+    CHECK(cJSON_GetArraySize(path(path(r.json, "error", "data"), "supported", NULL)) == 4);
+    done(&r);
+
+    /* A legacy version header after initialize is fine. */
+    eye_mcp_headers_t legacy = { .protocol_version = "2025-06-18" };
+    r = post(body, &legacy);
+    CHECK(r.status == 200 && cJSON_GetArraySize(path(r.json, "result", "tools")) == 7);
+    done(&r);
+
+    /* A proper modern request is unaffected. */
+    r = modern("tools/call", "stop_animation", "{}");
+    CHECK(r.status == 200 && !tool_is_error(&r));
+    done(&r);
+}
+
+static void test_last_request_record(void)
+{
+    fake_reset();
+    resp_t r = post("{\"jsonrpc\":\"2.0\",\"id\":1,\"method\":\"initialize\",\"params\":{"
+                    "\"protocolVersion\":\"2025-06-18\",\"clientInfo\":{\"name\":\"claude-code\",\"version\":\"9.9\"}}}", NULL);
+    done(&r);
+    eye_mcp_last_t last;
+    eye_mcp_last(&last);
+    CHECK(strcmp(last.era, "legacy") == 0 && strcmp(last.method, "initialize") == 0);
+    CHECK(strcmp(last.client, "claude-code 9.9") == 0 && last.status == 200);
+    unsigned before = last.count;
+
+    char body[512];
+    snprintf(body, sizeof(body),
+             "{\"jsonrpc\":\"2.0\",\"id\":2,\"method\":\"tools/list\",\"params\":{\"_meta\":{"
+             "\"io.modelcontextprotocol/protocolVersion\":\"2026-07-28\","
+             "\"io.modelcontextprotocol/clientInfo\":{\"name\":\"other\",\"version\":\"1\"}}}}");
+    eye_mcp_headers_t h = { .protocol_version = "2026-07-28", .method = "tools/list" };
+    r = post(body, &h);
+    done(&r);
+    eye_mcp_last(&last);
+    CHECK(strcmp(last.era, "modern") == 0 && strcmp(last.version, "2026-07-28") == 0);
+    CHECK(strcmp(last.client, "other 1") == 0 && last.count == before + 1);
+
+    /* The notification a legacy client sends right after initialize must not
+     * erase the era and version it just negotiated. */
+    r = post("{\"jsonrpc\":\"2.0\",\"method\":\"notifications/initialized\"}", NULL);
+    CHECK(r.status == 202);
+    done(&r);
+    eye_mcp_last(&last);
+    CHECK(strcmp(last.era, "legacy") == 0 && last.era[0] != '\0');
+    CHECK(strcmp(last.method, "notifications/initialized") == 0 && last.status == 202);
+
+    r = post("{broken", NULL);
+    done(&r);
+    eye_mcp_last(&last);
+    CHECK(last.status == 400 && strcmp(last.method, "?") == 0);
+}
+
 static void test_origin_and_malformed(void)
 {
     fake_reset();
@@ -328,6 +397,8 @@ int main(void)
         { "legacy initialize and list", test_legacy_initialize_and_list },
         { "modern discover and list", test_modern_discover_and_list },
         { "modern header validation", test_modern_header_validation },
+        { "header version without _meta", test_header_version_without_meta },
+        { "last request record", test_last_request_record },
         { "origin and malformed", test_origin_and_malformed },
         { "get_state", test_state },
         { "motion gating", test_motion_gating },

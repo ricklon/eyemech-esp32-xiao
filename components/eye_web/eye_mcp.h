@@ -39,6 +39,21 @@ typedef struct {
 void eye_mcp_handle(const char *body, size_t len, const eye_mcp_headers_t *hdr,
                     eye_mcp_reply_t *out);
 
+/* What the most recent request looked like, for /api/state: the one way to see
+ * which protocol era a client actually speaks. Strings point at static storage
+ * owned here and stay valid until the next request; esp_http_server runs every
+ * handler on one task, so reading them from another handler is safe. */
+typedef struct {
+    unsigned    count;     /* requests handled since boot                     */
+    const char *era;       /* "modern", "legacy" or "" before any request     */
+    const char *version;   /* protocol version the request used or implied    */
+    const char *method;
+    const char *client;    /* "name version" from clientInfo, "" if never sent */
+    int         status;    /* HTTP status it was answered with                */
+} eye_mcp_last_t;
+
+void eye_mcp_last(eye_mcp_last_t *out);
+
 #ifdef __cplusplus
 }
 #endif
