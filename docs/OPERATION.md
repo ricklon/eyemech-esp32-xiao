@@ -128,3 +128,43 @@ registers are zeroed by the chip's own reset — and goes straight to neutral.
 If a reset happens with the rail live and `safeboot off`, the mechanism will move
 on its own within a second of coming back. That is the case `safeboot on` exists
 to prevent.
+
+## Driving it from a shell
+
+The whole run sequence over HTTP, which is what a headless check looks like.
+Verified on the mechanism 2026-09-22:
+
+```
+curl -X POST http://eyemech.local/api/engage
+curl -X POST -H 'Content-Type: application/json' -d '{"mode":"manual"}' http://eyemech.local/api/mode
+curl -X POST -H 'Content-Type: application/json' -d '{"name":"look","repeat":1}' http://eyemech.local/api/anim
+curl -X POST http://eyemech.local/api/release
+```
+
+`tools/eyectl.py` wraps the same API more readably. Engage drives to neutral in
+any mode but `standby` and `calibration`, so it is a movement; `/api/release`
+latches the same way `!release` does.
+
+**`/api/state` and the MCP `get_state` name the same things differently.** The
+HTTP state has `anim` (empty string when idle), `lr` and `ud`; the MCP tool
+returns `animation` (null when idle) and `gaze: {lr, ud}`. Polling for the wrong
+one reads as "nothing is happening" whatever the mechanism is doing — and with no
+feedback, the only thing that can confirm a move is a person watching it.
+
+## MCP
+
+The board is an MCP server at `POST /mcp`, reached through
+`tools/eyemech_mcp.py`, a local stdio proxy registered with Claude Code. The
+proxy exists because a client that probes the URL at startup gives up on an
+unplugged board and stays given up for the whole session; see the 2026-09-21
+entry in [decisions.md](decisions.md).
+
+Seven tools: `get_state`, `look`, `blink`, `play_animation`, `stop_animation`,
+`set_mode`, `release`. **`engage` is deliberately not one of them**, and the
+motion tools refuse while released or in `standby` or `calibration`, so a model
+cannot bring a stopped mechanism back to life — that takes a person at the
+console or the control page.
+
+A tool error naming the host ("did not answer") means the proxy is running and
+the board is not reachable. `claude mcp list` reporting a failed server means the
+proxy itself did not start. Neither one is a firmware fault.

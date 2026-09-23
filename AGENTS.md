@@ -21,6 +21,9 @@ axes have been driven under power and remeasured after the rebuild — LR 42/138
 UD 40/140, TL 90/13, BL 93/172, TR 90/172, BR 90/15, recorded in `af314e3` — and
 the animations have been run and tuned on the mechanism (`a9899d7`). Joining a
 network by name and the console keystroke echo are verified on hardware too. The
+MCP server is verified on the board as well (2026-09-22): `initialize`,
+`tools/list` and `get_state` through `tools/eyemech_mcp.py`, with `mcp_last`
+confirming the era, and engage → `look` → release driven over the HTTP API. The
 control page is the surface actually in use.
 
 **Those measured limits live in NVS, not in the source.** The defaults table in

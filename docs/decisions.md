@@ -215,6 +215,14 @@ headless `claude -p` run called `get_state` through the registered server, and
 `claude-code 2.1.274` and status 200, with no `initialize`. The legacy path stays
 for other clients; nothing here depends on it.
 
+**Checked again 2026-09-22:** over the stdio proxy the same client negotiates
+the *legacy* revision instead — `mcp_last` recorded era `legacy`, version
+`2025-11-25`, client `claude-code 2.1.278`, `tools/call`, 200 — so the legacy
+path is the one in daily use from this host, not a fallback for other clients.
+The same session found that `notifications/initialized` returned before the era
+was read, blanking the record a legacy client had just filled in; fixed and
+verified on the board.
+
 Would revisit if: the board leaves a trusted LAN (add auth first), or a client
 needs change notifications (`subscriptions/listen`), which means holding a
 socket open.
