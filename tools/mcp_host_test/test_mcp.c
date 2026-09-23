@@ -236,6 +236,15 @@ static void test_last_request_record(void)
     CHECK(strcmp(last.era, "modern") == 0 && strcmp(last.version, "2026-07-28") == 0);
     CHECK(strcmp(last.client, "other 1") == 0 && last.count == before + 1);
 
+    /* The notification a legacy client sends right after initialize must not
+     * erase the era and version it just negotiated. */
+    r = post("{\"jsonrpc\":\"2.0\",\"method\":\"notifications/initialized\"}", NULL);
+    CHECK(r.status == 202);
+    done(&r);
+    eye_mcp_last(&last);
+    CHECK(strcmp(last.era, "legacy") == 0 && last.era[0] != '\0');
+    CHECK(strcmp(last.method, "notifications/initialized") == 0 && last.status == 202);
+
     r = post("{broken", NULL);
     done(&r);
     eye_mcp_last(&last);

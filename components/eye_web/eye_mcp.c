@@ -588,12 +588,6 @@ static void handle(const char *body, size_t len, const eye_mcp_headers_t *hdr,
     const char *method = method_j->valuestring;
     snprintf(s_last.method, sizeof(s_last.method), "%s", method);
 
-    if (id == NULL) {   /* a notification, e.g. legacy notifications/initialized */
-        out->status = 202;
-        cJSON_Delete(req);
-        return;
-    }
-
     const cJSON *params = cJSON_GetObjectItemCaseSensitive(req, "params");
     const cJSON *meta = cJSON_GetObjectItemCaseSensitive(params, "_meta");
     const cJSON *version = cJSON_GetObjectItemCaseSensitive(meta, META_VERSION);
@@ -611,6 +605,15 @@ static void handle(const char *body, size_t len, const eye_mcp_headers_t *hdr,
         if (strcmp(method, "initialize") == 0) {
             note_client(cJSON_GetObjectItemCaseSensitive(params, "clientInfo"));
         }
+    }
+
+    /* A notification is answered with nothing, but the era is read off it first:
+     * a legacy client sends notifications/initialized straight after initialize,
+     * and recording that one blank would erase the negotiation it just made. */
+    if (id == NULL) {
+        out->status = 202;
+        cJSON_Delete(req);
+        return;
     }
 
     if (!modern && hdr->protocol_version) {
