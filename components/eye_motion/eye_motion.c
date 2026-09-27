@@ -579,6 +579,22 @@ static const eye_frame_t s_frames_sleepy[] = {
     { 0.50f, 0.44f, 0.55f, 0.55f,1200 },   /* half open, still heavy */
 };
 
+/* The joke is the delay: the glance away has to look uninterested, and the
+ * return has to be faster than a deliberate look. The overshoot past centre and
+ * the recovery are what make it read as a reaction rather than a fast pan --
+ * eyes stop by arriving twice. 130 ms across 0.36 of the LR range is about
+ * 265 deg/s, inside what an MG90S does unloaded and under the 300 deg/s that
+ * follow mode allows. */
+static const eye_frame_t s_frames_double_take[] = {
+    { 0.50f, 0.50f, 0.85f, 0.85f, 250 },   /* neutral, unremarkable        */
+    { 0.78f, 0.52f, 0.80f, 0.80f, 400 },   /* drift away, uninterested     */
+    { 0.78f, 0.52f, 0.80f, 0.80f, 450 },   /* hold -- nothing registers    */
+    { 0.42f, 0.56f, 1.00f, 1.00f, 130 },   /* snap back past centre, wide  */
+    { 0.50f, 0.55f, 1.00f, 1.00f, 110 },   /* arrive: the second stop      */
+    { 0.50f, 0.55f, 1.00f, 1.00f, 900 },   /* hold the stare               */
+    { 0.50f, 0.50f, 0.85f, 0.85f, 600 },   /* relax, still watching        */
+};
+
 #define ANIM(id, d) { #id, d, s_frames_##id, \
                       (int)(sizeof(s_frames_##id) / sizeof(s_frames_##id[0])) }
 
@@ -589,6 +605,7 @@ static const eye_anim_t s_anims[] = {
     ANIM(wink,      "left eye winks"),
     ANIM(surprise,  "snap wide and hold, then settle"),
     ANIM(sleepy,    "lids droop, gaze sinks, slow close"),
+    ANIM(double_take, "glance away, then snap back wide and stare"),
 };
 #define ANIM_COUNT ((int)(sizeof(s_anims) / sizeof(s_anims[0])))
 
