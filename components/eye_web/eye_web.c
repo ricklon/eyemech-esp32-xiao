@@ -11,9 +11,11 @@
 #include <string.h>
 #include <strings.h>
 #include "cJSON.h"
+#include "sdkconfig.h"
 #include "esp_check.h"
 #include "esp_http_server.h"
 #include "esp_log.h"
+#include "esp_timer.h"
 #include "freertos/FreeRTOS.h"
 
 static const char *TAG = "eye_web";
@@ -562,8 +564,26 @@ static esp_err_t follow_stop_post(httpd_req_t *req)
     return send_ok(req);
 }
 
+/* True when `origin` is one of CONFIG_EYE_WEB_EXTRA_ORIGINS: exact entries,
+ * comma-separated, compared without regard to case. */
+static bool extra_origin(const char *origin)
+{
+    size_t n = strlen(origin);
+    const char *p = CONFIG_EYE_WEB_EXTRA_ORIGINS;
+    while (*p) {
+        while (*p == ',' || *p == ' ') p++;
+        const char *end = p;
+        while (*end && *end != ',' && *end != ' ') end++;
+        if (n > 0 && (size_t)(end - p) == n && strncasecmp(p, origin, n) == 0) return true;
+        p = end;
+    }
+    return false;
+}
+
 /* A browser on another origin must not get a socket that drives servos: same
- * rule, and the same reason, as /mcp. Runs before the upgrade is answered. */
+ * rule, and the same reason, as /mcp. Runs before the upgrade is answered.
+ * The exception is CONFIG_EYE_WEB_EXTRA_ORIGINS, by default the eye-tracking
+ * dashboard on localhost, which streams poses straight from the browser. */
 static esp_err_t ws_origin_check(httpd_req_t *req)
 {
     size_t olen = httpd_req_get_hdr_value_len(req, "Origin");
@@ -574,6 +594,7 @@ static esp_err_t ws_origin_check(httpd_req_t *req)
         httpd_req_get_hdr_value_str(req, "Host", host, sizeof(host)) != ESP_OK) {
         return ESP_FAIL;
     }
+    if (extra_origin(origin)) return ESP_OK;
     const char *o = origin;
     if (strncmp(o, "http://", 7) == 0)       o += 7;
     else if (strncmp(o, "https://", 8) == 0) o += 8;
@@ -598,14 +619,112 @@ static esp_err_t ws_send_error(httpd_req_t *req, const char *why)
     return err;
 }
 
+/* The heartbeat. Every /ws/pose socket is sent the board's follow state once
+ * on connect and every WS_STATE_MS after, so a sender can tell "following" from
+ * "connected but not moving" without inferring it from silence:
+ *
+ *   {"state":"following","mode":"follow"}
+ *   {"state":"returning","mode":"follow"}     easing to neutral after stop or timeout
+ *   {"state":"idle","mode":"auto"}            tracking, auto or manual: a pose would be taken
+ *   {"state":"refused","reason":"released","mode":"auto"}
+ *                                             reason: released|standby|calibration|anim
+ *
+ * The key is "state", not "status": existing pages print any "status" frame
+ * into their status line. The state is the board's, not the socket's, so two
+ * senders both see "following". The fd list is touched only on the httpd task:
+ * the timer just queues the work there. */
+#define WS_STATE_MS      333
+#define WS_MAX_POSE_SOCK 7   /* HTTPD_DEFAULT_CONFIG's max_open_sockets */
+
+static httpd_handle_t s_server;
+static int            s_pose_fds[WS_MAX_POSE_SOCK];
+static int            s_pose_fd_count;   /* read by the timer only to skip idle ticks */
+
+static char *ws_state_json(void)
+{
+    eye_mode_t mode = eye_motion_get_mode();
+    const char *state, *reason = NULL;
+    if (eye_servo_is_released()) {
+        state = "refused";
+        reason = "released";
+    } else if (mode == EYE_MODE_STANDBY || mode == EYE_MODE_CALIBRATION || mode == EYE_MODE_ANIM) {
+        state = "refused";
+        reason = eye_motion_mode_name(mode);
+    } else if (mode == EYE_MODE_FOLLOW) {
+        state = eye_motion_follow_leaving() ? "returning" : "following";
+    } else {
+        state = "idle";
+    }
+    cJSON *root = cJSON_CreateObject();
+    cJSON_AddStringToObject(root, "state", state);
+    if (reason) cJSON_AddStringToObject(root, "reason", reason);
+    cJSON_AddStringToObject(root, "mode", eye_motion_mode_name(mode));
+    char *text = cJSON_PrintUnformatted(root);
+    cJSON_Delete(root);
+    return text;
+}
+
+static void ws_send_text(int fd, const char *text)
+{
+    httpd_ws_frame_t f = { .type = HTTPD_WS_TYPE_TEXT, .payload = (uint8_t *)text, .len = strlen(text) };
+    (void)httpd_ws_send_frame_async(s_server, fd, &f);   /* a dead socket is pruned next tick */
+}
+
+/* httpd task. Drops sockets that are gone, then tells the rest. */
+static void ws_state_work(void *arg)
+{
+    (void)arg;
+    int n = 0;
+    for (int i = 0; i < s_pose_fd_count; i++) {
+        if (httpd_ws_get_fd_info(s_server, s_pose_fds[i]) == HTTPD_WS_CLIENT_WEBSOCKET) {
+            s_pose_fds[n++] = s_pose_fds[i];
+        }
+    }
+    s_pose_fd_count = n;
+    if (n == 0) return;
+
+    char *text = ws_state_json();
+    if (!text) return;
+    for (int i = 0; i < n; i++) ws_send_text(s_pose_fds[i], text);
+    cJSON_free(text);
+}
+
+static void ws_state_timer(void *arg)
+{
+    (void)arg;
+    if (s_pose_fd_count > 0) (void)httpd_queue_work(s_server, ws_state_work, NULL);
+}
+
+/* httpd task, right after the upgrade has been answered. */
+static void ws_pose_opened(int fd)
+{
+    bool known = false;
+    for (int i = 0; i < s_pose_fd_count; i++) known |= (s_pose_fds[i] == fd);
+    if (!known) {
+        if (s_pose_fd_count == WS_MAX_POSE_SOCK) {
+            ESP_LOGW(TAG, "no heartbeat slot for /ws/pose fd %d", fd);
+            return;
+        }
+        s_pose_fds[s_pose_fd_count++] = fd;
+    }
+    char *text = ws_state_json();
+    if (!text) return;
+    ws_send_text(fd, text);
+    cJSON_free(text);
+}
+
 /* The streaming path. Each text frame is a pose object, or {"stop":true}.
  * Accepted poses get no reply, to keep a 30 Hz stream cheap; refusals get an
- * {"error":...} frame so the sender can see why nothing moves. */
+ * {"error":...} frame so the sender can see why nothing moves. The heartbeat
+ * above says whether the board is following. */
 #define WS_MAX_FRAME 256
 
 static esp_err_t ws_pose(httpd_req_t *req)
 {
-    if (req->method == HTTP_GET) return ESP_OK;   /* the upgrade itself */
+    if (req->method == HTTP_GET) {   /* the upgrade itself */
+        ws_pose_opened(httpd_req_to_sockfd(req));
+        return ESP_OK;
+    }
 
     httpd_ws_frame_t f = { 0 };
     esp_err_t err = httpd_ws_recv_frame(req, &f, 0);
@@ -763,6 +882,12 @@ esp_err_t eye_web_start(void)
         ESP_RETURN_ON_ERROR(httpd_register_uri_handler(server, &s_routes[i]),
                             TAG, "route %s", s_routes[i].uri);
     }
+    s_server = server;
+
+    const esp_timer_create_args_t hb = { .callback = ws_state_timer, .name = "ws_state" };
+    esp_timer_handle_t timer;
+    ESP_RETURN_ON_ERROR(esp_timer_create(&hb, &timer), TAG, "ws_state timer");
+    ESP_RETURN_ON_ERROR(esp_timer_start_periodic(timer, WS_STATE_MS * 1000), TAG, "ws_state timer");
     ESP_LOGI(TAG, "http server listening on :80");
     return ESP_OK;
 }

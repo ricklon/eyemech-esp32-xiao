@@ -782,6 +782,16 @@ esp_err_t eye_motion_follow_stop(void)
     return ESP_OK;
 }
 
+/* The same test follow_tick() uses to decide it is leaving. */
+bool eye_motion_follow_leaving(void)
+{
+    if (s_mode != EYE_MODE_FOLLOW) return false;
+    portENTER_CRITICAL(&s_pose_lock);
+    bool leaving = s_follow_stopping || (now_ms() - s_pose_at) > EYE_FOLLOW_TIMEOUT_MS;
+    portEXIT_CRITICAL(&s_pose_lock);
+    return leaving;
+}
+
 /* A lid's position for a pose value: 0 closed, 1 the trimmed open position. */
 static float lid_pose(eye_servo_id_t id, float v)
 {
