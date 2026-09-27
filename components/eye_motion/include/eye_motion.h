@@ -100,6 +100,11 @@ esp_err_t eye_motion_follow(const eye_pose_t *pose);
  * ESP_ERR_INVALID_STATE when not following. */
 esp_err_t eye_motion_follow_stop(void);
 
+/* True while still EYE_MODE_FOLLOW but easing back to neutral, after
+ * eye_motion_follow_stop() or a timeout: the stream is no longer being tracked.
+ * False in every other mode. */
+bool eye_motion_follow_leaving(void);
+
 /* --- animations ----------------------------------------------------------
  *
  * A keyframe is expressed in NORMALISED units, not degrees, so a sequence
