@@ -252,7 +252,7 @@ esp_err_t eye_motion_control_ud_and_lids(float ud_angle)
      * the calibrated .max for lid_open() recovers the original exactly.
      *
      * The upper/lower coefficients are the character of the face — see
-     * CLAUDE.md — and are tunable at runtime rather than compiled in. */
+     * AGENTS.md — and are tunable at runtime rather than compiled in. */
     float tl_open = lid_open(EYE_TL), tr_open = lid_open(EYE_TR);
     float bl_open = lid_open(EYE_BL), br_open = lid_open(EYE_BR);
 
