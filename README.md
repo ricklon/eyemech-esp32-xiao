@@ -115,7 +115,8 @@ their last position; `pca.all_off()` releases them.
 | `anim` | Plays a named animation, then returns to the previous mode |
 | `follow` | Eases toward live poses from a tracker; entered by sending a pose |
 
-Animations: `look`, `roll`, `side_eye`, `wink`, `surprise`, `sleepy`.
+Animations: `look`, `roll`, `side_eye`, `wink`, `surprise`, `sleepy`,
+`double_take`.
 
 With **safe boot** on, the board comes up released and in `standby`, so nothing
 moves until a person engages it. Keep it on during any mechanical work.
