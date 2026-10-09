@@ -1,30 +1,37 @@
 # eyemech-esp32-xiao
 
-Firmware for a 3D-printed copy of [Will Cogley's ε-series animatronic eye
-mechanism](https://nmrobots.com/pages/designs), driven by a Seeed XIAO ESP32
-in place of the original electronics. Two gaze axes and four eyelids on six
-servos, a browser control page, a serial console, and an MCP server so an agent
-can drive it.
+Firmware for a 3D-printed [Will Cogley EyeMech
+ε3.4](https://nmrobots.com/products/eyemech-%CE%B53-4-with-on-board-face-tracking),
+driven by a Seeed XIAO ESP32 in place of the original electronics. Two gaze axes
+and four eyelids on six servos, a browser control page, a serial console, and an
+MCP server so an agent can drive it.
 
 ## The mechanism
 
-The printed parts, linkages and servos are Will Cogley's design, as published by
-NM Robotics. It is printed and assembled to his design, with **six MG90S** metal-gear
-servos, the same servos the design calls for.
+The printed parts and linkages are Will Cogley's **ε3.4** design, the snap-fit
+revision of his ε-series eye mechanism with the camera-ready eye, sold by NM
+Robotics. This build is printed from his single-plate file, [`Eyemech
+e3.4.3mf`](https://drive.google.com/file/d/1Lum91_CLT5T7coVKDd-vOT7qpXyEPTcT/view),
+linked from the product page.
+
+It runs **six MG90S** metal-gear servos. His ε3.4 kit ships TS90MD instead, which
+are quieter.
 
 The electronics are what this repo replaces. Instead of his Eye Mechanism
-Controller Board, this build uses:
+Controller Board β2.0 and the code in his repo, this build uses:
 
 - a **Seeed XIAO ESP32-S3** (the C6 is supported too),
 - a **PCA9685** 16-channel PWM board over I²C at `0x40`,
 - a separate 6 V servo rail sized for 4–5 A,
 - optionally a **Grove Vision AI** module over UART for face tracking.
 
-No CAD or print files are in this repo. Get them from the link above or from
-[will-cogley/EyeMech_Epsilon](https://github.com/will-cogley/EyeMech_Epsilon).
-The design is licensed [CC BY-NC-SA
+No CAD or print files are in this repo. Earlier revisions (ε3.2) and his
+controller code are in
+[will-cogley/EyeMech_Epsilon](https://github.com/will-cogley/EyeMech_Epsilon),
+which is licensed [CC BY-NC-SA
 4.0](https://creativecommons.org/licenses/by-nc-sa/4.0/): attribution,
-non-commercial, share-alike. Commercial use goes through enquiries@willcogley.com.
+non-commercial, share-alike. The ε3.4 file carries no licence of its own; treat
+it the same way. Commercial use goes through enquiries@willcogley.com.
 
 ## Status
 
