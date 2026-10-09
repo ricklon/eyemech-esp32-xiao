@@ -203,7 +203,7 @@ static esp_err_t lid_trim_post(httpd_req_t *req)
     return send_ok(req);
 }
 
-/* How hard each lid pair tracks vertical gaze. CLAUDE.md calls these the
+/* How hard each lid pair tracks vertical gaze. AGENTS.md calls these the
  * character of the face and asks for changes to be recorded in
  * docs/decisions.md — hence the note on the page rather than a bare slider.
  * Omitted fields keep their current value, so one slider can move alone. */
