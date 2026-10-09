@@ -5,7 +5,7 @@ wrong, fix it rather than working around it.
 
 ## What this is
 
-Will Cogley's animatronic eye mechanism, being **ported from MicroPython to
+Will Cogley's animatronic eye mechanism (EyeMech ε3.4, 3D printed), being **ported from MicroPython to
 ESP-IDF C**. Six servos on a PCA9685 over I²C, optional face tracking from a
 Grove Vision AI module over UART.
 
